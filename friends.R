@@ -1,3 +1,7 @@
+##### ##### ##### ##### ##### ##### 
+##### Scraping the Data ##### #####
+##### ##### ##### ##### ##### ##### 
+
 # Load necessary libraries
 library(rvest)
 library(dplyr)
