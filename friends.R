@@ -1,63 +1,77 @@
-library(data.table)
-library(rvest) # read_html 的包
+# Load necessary libraries
+library(rvest)
+library(dplyr)
+library(stringr)
+library(purrr)
 
-pages <- paste0("https://transcripts.foreverdreaming.org/viewforum.php?f=845&start=", seq(0, 225, 25))
+# Base URL for the main Friends transcript page
+base_url <- "https://fangj.github.io/friends/"
 
-process_one_link <- function(my_link){
-   t <- read_html(my_link)
-   episodes <- list()
-   episodes[['name']] <- t %>% html_nodes(".topictitle") %>% html_text()
-   episodes[['link']] <- t %>% html_nodes(".topictitle") %>% html_attr('href')
-   return(episodes)
- }
-
-episode_links <- data.table(rbindlist(lapply(pages, process_one_link)))
- 
-episode_links <- episode_links[name != "Updates: 5/1/22 Editors Needed :)",]
-
-link <- episode_links$link[2]
-
-get_transcript <- function(link) {
-    print(link)
-    t <- read_html(paste0("https://transcripts.foreverdreaming.org", str_sub(link, start = 2) ))
-    transcript <- t %>% html_nodes("#pagecontent p") %>% html_text()
-    tinfo <- t %>% html_nodes('h2') %>% html_text()
-    transcript <- str_subset(transcript, "^(?!\\[)")
-    transcript <- str_subset(transcript, "^(?!\\()")
-    transcript <- str_subset(transcript, "^(?!Scene)")
-    transcript<- transcript[grepl(':', transcript, fixed = T)]
-
-    textdf <- 
-     rbindlist(
-        lapply(transcript, function(x){
-          t_piaces <- strsplit(x, ':')[[1]]
-          data.table('actor' = t_piaces[1], 'text' = trimws(paste(t_piaces[2:length(t_piaces)], collapse = " " )) )
-        })
-      )
-    
-    textdf$season <- substring(tinfo, 1, 2)
-    textdf$episode <- substring(tinfo, 4, 5)
-    textdf$title <- substring(tinfo, 9,nchar(tinfo))
-    return(textdf)
+# Function to scrape episode links from the main page
+scrape_episode_links <- function(base_url) {
+  main_page <- read_html(base_url)
+  links <- main_page %>%
+    html_nodes("a") %>%
+    html_attr("href") %>%
+    na.omit() %>%
+    str_subset("^season/") %>%
+    unique() %>%
+    paste0(base_url, .)
+  return(links)
 }
 
-# 先安装这两个
-install.packages("pbapply")
-library(pbapply)
+# Function to scrape dialogues and additional details from an episode's transcript page
+scrape_dialogues <- function(episode_link) {
+  page <- read_html(episode_link)
+  
+  # Extract episode title
+  episode_title <- page %>%
+    html_nodes("title") %>%
+    html_text() %>%
+    str_trim()
+  
+  dialogues <- page %>%
+    html_nodes("p") %>%
+    html_text() %>%
+    .[str_detect(., "^(Monica|Joey|Chandler|Phoebe|Ross|Rachel):")]
+  
+  if (length(dialogues) == 0) {
+    return(data.frame(author = character(0), quote = character(0), quote_order = integer(0), episode_link = character(0), episode_number = character(0), episode_title = character(0), season = integer(0), episode = integer(0), stringsAsFactors = FALSE))
+  }
+  
+  authors <- str_extract(dialogues, "^[A-Za-z]+")
+  quotes <- str_replace_all(dialogues, "^[A-Za-z]+:", "") %>%
+    str_trim()
+  quote_order <- seq_along(quotes)
+  
+  # Correctly parsing season and episode from the URL
+  matches <- str_match(episode_link, "season/(\\d{2})(\\d{2})\\.html")
+  season <- as.numeric(matches[1,2])
+  episode <- as.numeric(matches[1,3])
+  episode_number <- sprintf("S%02dE%02d", season, episode)
+  
+  data.frame(
+    author = authors,
+    quote = quotes,
+    quote_order = quote_order,
+    episode_link = episode_link,
+    episode_number = episode_number,
+    episode_title = episode_title,
+    season = season,
+    episode = episode,
+    stringsAsFactors = FALSE
+  )
+}
 
-install.packages("stringr")
-library(stringr)
+# Scrape episode links
+episode_links <- scrape_episode_links(base_url)
 
+# Scrape dialogues for each episode and compile into a single dataframe
+all_dialogues <- map_df(episode_links, ~scrape_dialogues(.x))
 
-t_list <- pblapply(episode_links$link, get_transcript)
-full_df <- rbindlist(t_list, fill = T)
-# 这段运行需要等一会 大概10分钟？
+# Check the structure and the first few rows of the compiled dialogues dataframe
+#print(str(all_dialogues))
+#head(all_dialogues)
 
-saveRDS(full_df, "friends_data.rds")
- 
-write.csv(full_df, "friends_data.csv", row.names = F)
- 
-
-Data can be downloaded from here: https://github.com/maryamkhan1120/DS2/blob/main/Final-Project/friends_data.rds
-Since the file was too big I was unable to call it directly from gtihub
-data <- readRDS("friends_data.rds")
+# Code to write the dataframe to a CSV file
+write.csv(all_dialogues, "friends_quotes.csv", row.names = FALSE)
