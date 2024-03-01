@@ -1,4 +1,5 @@
-# friends
-Our group R project for Applied Analytics Frameworks and Methods II
-APAN 5205
-ver 1.0 by Sixuan: Scraping the Data
+# APANPS5205: Applied Analytics Frameworks and Methods II Final Project
+Group Members: Haoran Yang, Sixuan Li, Wenling Zhou, Wenyang Cao
+
+
+![Joey doesn't share food](https://media.giphy.com/media/xUOxf9EI2iTP9tl9Yc/giphy.gif)
