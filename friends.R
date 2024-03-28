@@ -1,14 +1,6 @@
-##### ##### ##### ##### ##### ##### 
-##### Scraping the Data ##### ##### 
-##### ##### ##### ##### ##### ##### 
+# Scraping the Data ####
 
-##### ##### ##### ##### ##### ##### 
-#####       Part I      ##### ##### 
-##### ##### ##### ##### ##### ##### 
-
-##### ##### ##### ##### ##### ##### 
-# Part I: parse_and_scrape function
-##### ##### ##### ##### ##### ##### 
+## Part I: parse_and_scrape function ####
 
 # Load necessary libraries
 library(rvest)
@@ -80,13 +72,7 @@ episode_links <- html_nodes(main_page, "ul li a")
 # Parse episode details and scrape dialogues for each episode link
 dialogues_data <- map_df(episode_links, parse_and_scrape)
 
-##### ##### ##### ##### ##### ##### 
-#####       Part II     ##### ##### 
-##### ##### ##### ##### ##### ##### 
-
-##### ##### ##### ##### ##### ##### 
-# Part II: parse_single_episode function
-##### ##### ##### ##### ##### ##### 
+## Part II: parse_single_episode function ####
 
 #Due to missing lines in the HTML source of episodes 3-24 of season 2, caused by <br> tags not 
 #being captured during the initial scrape, these episodes were excluded from the original dataset. 
@@ -182,14 +168,7 @@ episode_urls <- c(
 # Process each episode and combine data
 dialogues_data_s2 <- map_df(episode_urls, parse_single_episode)
 
-##### ##### ##### ##### ##### ##### 
-#####       Part III    ##### ##### 
-##### ##### ##### ##### ##### ##### 
-
-
-##### ##### ##### ##### ##### ##### 
-# Part III: Merge and Clean
-##### ##### ##### ##### ##### ##### 
+## Part III: Merge and Clean ####
 
 # Merge dialogues_data_wo_s2 and dialogues_data_s2
 df <- bind_rows(dialogues_data_wo_s2, dialogues_data_s2)
@@ -238,16 +217,194 @@ print(quotes_count_per_episode)
 # Display the unique authors
 print(unique(df$author))
 
-##### ##### ##### ##### ##### ##### 
-#####       Part IV     ##### ##### 
-##### ##### ##### ##### ##### ##### 
-
-##### ##### ##### ##### ##### ##### 
-# Part IV: CSV and ZIP Files
-##### ##### ##### ##### ##### ##### 
+## Part IV: CSV and ZIP Files ####
 
 # Write the dataframe to a CSV file
 write.csv(df, "friends_quotes.csv", row.names = FALSE)
 
 # Compress the CSV file into a ZIP file
 zip(zipfile = "friends_quotes.zip", files = "friends_quotes.csv")
+
+# Text Mining & Data Visualization ####
+
+## Part I: Initial Setup and Data Preparation ####
+
+# Load necessary libraries
+library(tidyverse)
+library(tidytext)
+library(topicmodels)
+library(DT)
+library(png)
+library(grid)
+
+# Convert the dataframe 'df' to a tibble for easier manipulation and viewing
+df %>% as_tibble()
+
+## Part II: Sentiment Lexicons Loading ####
+
+# Load various sentiment lexicons
+afinn <- get_sentiments('afinn')
+nrc <- get_sentiments('nrc')
+bing <- get_sentiments('bing')
+loughran <- get_sentiments('loughran')
+
+## Part III: Text Cleaning and Preprocessing ####
+
+# Clean and preprocess text data
+tidy_text <- df %>%
+  unnest_tokens(word, quote) %>%  # Tokenize the quotes into words
+  anti_join(stop_words) %>%  # Remove stop words
+  filter(!word %in% tolower(author)) %>%  # Remove character names
+  # Additional custom cleaning steps
+  filter(!word %in% c("uhm", "it’s", "ll", "im", "don’t", "i’m", "that’s", "ve", "that’s", "you’re",
+                      "woah", "didn", "what're", "alright", "she’s", "we’re", "dont", "c'mere", "wouldn",
+                      "isn","pbs", "can’t", "je", "youre", "doesn", "007", "haven", "whoah", "whaddya", 
+                      "somethin", "yah", "uch", "i’ll", "there’s", "won’t", "didn’t", "you’ll", "allright",
+                      "yeah", "hey", "uh", "gonna", "umm", "um", "y'know", "ah", "ohh", "wanna", "ya", "huh", "wow",
+                      "whoa", "ooh", "don")) %>%
+  mutate(word = str_remove_all(word, "'s")) 
+
+tidy_text %>% as_tibble()  # Display the cleaned text
+
+## Part IV: Sentiment Analysis with Various Lexicons ####
+
+# Sentiment analysis with Bing lexicon
+tidy_bing <- tidy_text %>% inner_join(bing)
+
+# Sentiment analysis with NRC lexicon
+tidy_nrc <- tidy_text %>% inner_join(nrc)
+
+# Sentiment analysis with AFINN lexicon
+tidy_afinn <- tidy_text %>% inner_join(afinn)
+
+## Part V: Visualizing Sentiments ####
+
+tidy_nrc %>% 
+  filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")) %>% 
+  ggplot(aes(sentiment, fill = author)) +
+  geom_bar(show.legend = FALSE) +
+  facet_wrap(~author) +
+  theme_dark() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold")
+  ) +
+  labs(fill = NULL, x = NULL, y = "Sentiment Frequency", title = "Sentiments of Each Character Using NRC Lexicon") +
+  scale_fill_manual(values = c("#EA181E", "#00B4E8", "#FABE0F", "#EA181E", "#00B4E8", "#FABE0F"))
+
+tidy_bing %>% 
+  filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")) %>% 
+  group_by(season, author) %>% 
+  count(sentiment) %>%
+  ungroup() %>%
+  ggplot(aes(season, n, fill = sentiment)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = n), position = position_fill(0.5), color = "white") +
+  coord_flip() +
+  facet_wrap(~author) +
+  theme_dark() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold")
+  ) +
+  scale_fill_manual(values = c("#EA181E", "#00B4E8")) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  labs(y = NULL, x = "Season", fill = NULL, title = "Negative-Positive Ratio in All Seasons Using Bing Lexicon")
+
+df %>% 
+  group_by(season) %>% 
+  mutate(seq = row_number()) %>% 
+  ungroup() %>% 
+  unnest_tokens(word, quote) %>% 
+  anti_join(stop_words) %>% 
+  filter(!word %in% tolower(author)) %>% 
+  inner_join(bing) %>% 
+  count(season, index = seq %/% 50, sentiment) %>% 
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative) %>% 
+  ggplot(aes(index, sentiment, fill = factor(season))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(paste0("Season ",season)~., ncol = 2, scales = "free_x")+
+  theme_dark()+
+  theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))+
+  labs(x = "Index", y = "Sentiment", title = "Negative-Positive Distribution in all seasons by using afinn lexicon")
+
+all <- tidy_afinn %>% 
+  mutate(Episode = factor(paste0("S",season,"-","E",episode_number))) %>% 
+  group_by(Episode) %>% 
+  summarise(total = sum(value), .groups = 'drop') %>% 
+  ungroup %>% 
+  mutate(Neg = if_else(total < 0, TRUE, FALSE))
+
+ggplot()+
+  geom_path(all, mapping = aes(Episode, total, group = 1), color = "#BA0E00")+
+  geom_hline(mapping = aes(yintercept = 0), color = "#024D38")+
+  theme_classic()+
+  theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        plot.title = element_text(hjust = 0.5, color = "#EA181E", size = 20, face = "bold"))+
+  geom_text((all %>% filter(Neg == TRUE)), mapping = aes(Episode, total-15, label = Episode), angle = 90, size = 3)+
+  labs(title = "Total Sentiment Score each Episode with Afinn Lexicon", 
+       y = "Total Sentiment Score")
+
+tidy_afinn %>% 
+  filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")) %>% 
+  group_by(season, author) %>% 
+  summarise(total = sum(value), .groups = 'drop') %>% 
+  ungroup() %>% 
+  mutate(Neg = if_else(total < 0, TRUE, FALSE)) %>% 
+  ggplot()+
+  geom_path(aes(season, total, color = author), linewidth = 1.2)+
+  theme_minimal()+
+  theme(legend.position = "bottom")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))+
+  scale_color_manual(values = c("#EA181E", "#00B4E8", "#FABE0F", "seagreen2", "orchid", "royalblue"))+
+  labs(x = "Season", color = NULL, y = "Total Sentiment Score")
+
+## Part VI: Analyzing LDA Model Results ####
+
+# Prepare a Document-Term Matrix (DTM) for LDA topic modeling
+dtm <- tidy_text %>% 
+  select(season, word) %>% 
+  group_by(season, word) %>% 
+  count() %>% 
+  cast_dtm(season, word, n)
+
+# Perform LDA topic modeling with a fixed seed for reproducibility
+lda <- LDA(dtm, k = 10, control = list(seed = 1234))
+
+### Word-Topic Probabilities ####
+# Extract and visualize the word-topic probabilities from the LDA model
+topics <- tidy(lda, matrix = "beta")
+
+# Identify and arrange the top terms for each topic
+top_terms <- topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# Visualization of top terms in each topic
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered() +
+  labs(title = "Word-Topic Probabilities") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))
+
+### Document-Topic Probabilities ####
+# Extract and visualize the document-topic probabilities from the LDA model
+documents <- tidy(lda, matrix = "gamma")
+
+# Visualization of document-topic distribution for each season
+documents %>%
+  ggplot(aes(document, gamma, fill = factor(topic))) +
+  geom_col(position = "fill") +
+  labs(x = "Season", fill = "Topic", y = "Gamma", title = "Document-Topic Probabilities") +
+  scale_fill_ordinal() +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold")
+  )
