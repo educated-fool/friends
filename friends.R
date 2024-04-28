@@ -1,4 +1,4 @@
-# Scraping the Data ####
+## 1. Data Collection and Preprocessing 
 
 ## Part I: parse_and_scrape function ####
 
@@ -225,8 +225,7 @@ write.csv(df, "friends_quotes.csv", row.names = FALSE)
 # Compress the CSV file into a ZIP file
 zip(zipfile = "friends_quotes.zip", files = "friends_quotes.csv")
 
-# Text Mining & Data Visualization ####
-
+## 2. Exploratory Data Analysis
 ## Part I: Initial Setup and Data Preparation ####
 
 # Load necessary libraries
@@ -236,6 +235,15 @@ library(topicmodels)
 library(DT)
 library(png)
 library(grid)
+library(wordcloud)
+library(circlize)
+library(RColorBrewer)
+library(ggraph)
+library(igraph)
+library(reshape2)
+library(ggimage)
+library(plotly)
+
 
 # Convert the dataframe 'df' to a tibble for easier manipulation and viewing
 df %>% as_tibble()
@@ -266,7 +274,7 @@ tidy_text <- df %>%
 
 tidy_text %>% as_tibble()  # Display the cleaned text
 
-## Part IV: Sentiment Analysis with Various Lexicons ####
+## Part IV: Sentiment Analysis Preparation ####
 
 # Sentiment analysis with Bing lexicon
 tidy_bing <- tidy_text %>% inner_join(bing)
@@ -277,21 +285,351 @@ tidy_nrc <- tidy_text %>% inner_join(nrc)
 # Sentiment analysis with AFINN lexicon
 tidy_afinn <- tidy_text %>% inner_join(afinn)
 
-## Part V: Visualizing Sentiments ####
+## Voices of Influence: Highlighting the Dominant Characters in Each Episode of 'Friends' ####
+# Summarize the count of quotes by season, episode, and author
+quote_counts <- df %>%
+  group_by(season, episode, author) %>%
+  summarise(quote_count = n(), .groups = "drop")
 
-tidy_nrc %>% 
-  filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")) %>% 
-  ggplot(aes(sentiment, fill = author)) +
-  geom_bar(show.legend = FALSE) +
-  facet_wrap(~author) +
+# Select the character with the most quotes in each episode
+top_authors <- quote_counts %>%
+  arrange(desc(quote_count)) %>%
+  group_by(season, episode) %>%
+  slice(1) %>%
+  ungroup()
+
+# Create labels and parent nodes for the treemap
+labels <- c("Friends", paste("Season", unique(top_authors$season)), paste("Season", top_authors$season, "Episode", top_authors$episode, sep = " "))
+parents <- c("", rep("Friends", length(unique(top_authors$season))), rep(paste("Season", top_authors$season, sep = " "), each = 1))
+
+# Generate hover text showing only season and episode
+hover_text <- paste(labels, "<br>Most Vocal Character: ", top_authors$author)
+
+# Generate the treemap
+fig <- plot_ly(
+  type = "treemap",
+  labels = labels,
+  parents = parents,
+  text = hover_text,
+  hoverinfo = "text",
+  marker = list(colorscale = "Reds")
+)
+
+# Display the treemap
+fig
+
+## Dialogue Dynamics: Words and Lines Spoken by Friends Characters ####
+character_summary <- df %>%
+  group_by(author) %>%
+  summarise(
+    line_count = n(),
+    word_count = sum(str_count(quote, "\\S+"))
+  ) %>%
+  ungroup()
+# Set the image path for each character
+character_summary$image_path <- c(
+  "Chandler" = "pics/Chandler.png",
+  "Joey" = "pics/Joey.png",
+  "Monica" = "pics/Monica.png", 
+  "Phoebe" = "pics/Phoebe.png",
+  "Rachel" = "pics/Rachel.png", 
+  "Ross" = "pics/Ross.png"
+)
+
+# Create the plot using ggplot2
+ggplot(character_summary, aes(x = word_count, y = line_count, size = line_count)) +
+  geom_image(aes(image = image_path), size = 0.05) +
+  scale_size_continuous(range = c(3, 10)) +
+  theme_minimal() +
+  labs(title = "Dialogue Dynamics: Words and Lines Spoken by Friends' Characters",
+       subtitle = "Analyzing character engagement throughout the series",
+       x = "Count of Words",
+       y = "Number of lines") +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold", size = 16)) 
+
+## Seasonal Dialogue Distribution Among Friends Characters ####
+speaking_count <- df %>%
+  group_by(season, author) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  ungroup() %>%
+  mutate(max_count = max(count)) %>%
+  mutate(norm_count = count / max_count) %>%
+  select(season, author, norm_count)
+
+speaking_count_long <- speaking_count %>%
+  pivot_longer(cols = norm_count, names_to = "variable", values_to = "value")
+
+ggplot(speaking_count_long, aes(x = author, y = season, fill = value)) +
+  geom_tile() + 
+  geom_text(aes(label = round(value, 2)), color = "white", size = 3) +
+  scale_fill_gradientn(colors = brewer.pal(9, "Blues")) +
+  labs(title = "Seasonal Dialogue Distribution Among Friends' Characters",
+       subtitle = "Comparative analysis of speaking volumes by season",
+       x = "",
+       y = "Season") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 14))
+
+## Character Interaction Dynamics in Narrative Analysis ####
+# Calculate dialogue counts
+dialogue_counts <- df %>%
+  mutate(next_author = lead(author)) %>%
+  filter(author != next_author) %>%
+  group_by(author, next_author) %>%
+  summarise(count = n(), .groups = 'drop') %>%  # Use .groups='drop' to ungroup after summarising
+  filter(!is.na(next_author)) %>%
+  rename(From = author, To = next_author, Value = count)
+
+# Plotting a chord diagram to visualize interactions
+chordDiagram(as.data.frame(dialogue_counts))
+
+# Calculate interaction pairs
+interaction_pairs <- df %>%
+  mutate(next_author = lead(author)) %>%
+  filter(!is.na(next_author) & author != next_author) %>%
+  group_by(author, next_author) %>%
+  summarise(interactions = n(), .groups = 'drop')  # Again, dropping groups after summarising
+
+# Create an undirected graph from the interaction pairs
+graph <- graph_from_data_frame(interaction_pairs, directed = FALSE)
+
+# Calculate the correlation (or some measure of strength of relationship) between characters
+# Here, we just use the number of interactions as a proxy for correlation
+correlation_matrix <- as_adjacency_matrix(graph, attr = "interactions", sparse = FALSE)
+colnames(correlation_matrix) <- V(graph)$name
+rownames(correlation_matrix) <- V(graph)$name
+
+## Mapping Character Interactions: Network Visualization of Dialogue Dynamics ####
+# Use a circle layout to evenly distribute nodes
+# Adjust edge width and transparency to be more pronounced for higher interactions
+ggraph(graph, layout = 'circle') +
+  geom_edge_link(aes(edge_width = sqrt(interactions), edge_alpha = sqrt(interactions)), edge_colour = "gold") +
+  geom_node_point(color = "darkred", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1.8, size = 3.5) +
+  theme_void() +
+  theme(plot.margin = unit(c(1, 1, 1, 1), "cm")) 
+
+## Word Cloud: Positive vs. Negative Words in Friends ####
+Friends <- read.csv("data/friends_quotes.csv", stringsAsFactors = FALSE)
+Friends <- Friends %>%
+  mutate(text = as.character(quote))
+friends_tokens <- Friends %>%
+  unnest_tokens(word, text)
+wordcloud_pos_neg <- friends_tokens %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#E91E22", "#F1BF45"), max.words = 200)
+
+generate_wordcloud_for_author <- function(data, author_name, min_freq = 1, max_words = 200, colors = brewer.pal(8, "Dark2")) {
+  # Subset the data for the specified author
+  author_data <- subset(data, author == author_name)
+  
+  # Unnest words from the quotes
+  author_words <- author_data %>%
+    unnest_tokens(word, quote)
+  
+  # Remove common stop words
+  data("stop_words")
+  author_words_cleaned <- author_words %>%
+    anti_join(stop_words, by = "word")
+  
+  # Create a frequency table of words
+  word_freq <- author_words_cleaned %>%
+    count(word, sort = TRUE)
+  
+  # Set seed for reproducibility of the word cloud
+  set.seed(1234)
+  
+  # Generate the word cloud
+  wordcloud(words = word_freq$word,
+            freq = word_freq$n,
+            min.freq = min_freq,  # minimum frequency for words to be plotted
+            max.words = max_words,  # maximum number of words to be plotted
+            random.order = FALSE,  # plot words according to their frequency
+            rot.per = 0.35,  # proportion of words displayed vertically
+            scale = c(3, 0.5),  # scale between the largest and smallest words
+            colors = colors)  # colors for the word cloud
+  main = paste("Word Cloud for", author_name)
+}
+
+## Word Clouds for Each Friends Character ####
+# Use the function to generate word clouds for a list of six authors
+authors <- c("Ross", "Rachel", "Joey", "Monica", "Chandler", "Phoebe")
+for (author in authors) {
+  generate_wordcloud_for_author(df, author)  # Generate the word cloud for each author
+}
+
+create_word_proportion_plot <- function(character1, character2) {
+  plot_data <- tidy_text %>%
+    filter(author %in% c(character1, character2)) %>% 
+    count(author, word) %>%
+    group_by(author) %>% 
+    mutate(proportion = round(n / sum(n), 3)) %>%
+    select(-n) %>% 
+    pivot_wider(names_from = author, values_from = proportion, values_fill = list(proportion = 0)) %>%
+    ungroup() %>%
+    mutate(
+      !!character1 := ifelse(.data[[character1]] == 0, 0.0001, .data[[character1]]),
+      !!character2 := ifelse(.data[[character2]] == 0, 0.0001, .data[[character2]])
+    )
+  
+  log_format <- function(base = 10) {
+    function(x) {
+      paste0(base, "^", round(log(x, base), 1))
+    }
+  }
+  
+  ggplot(plot_data, aes(x = .data[[character1]], y = .data[[character2]], color = abs(.data[[character1]] - .data[[character2]]))) +
+    geom_abline(color = "gray40", lty = 2) +
+    geom_jitter(alpha = 0.05, size = 1, width = 0.1, height = 0.1) +
+    geom_text(aes(label = word), check_overlap = TRUE, vjust = 0.5, size = 3.5) +
+    scale_x_log10(labels = log_format()) +
+    scale_y_log10(labels = log_format()) +
+    scale_color_gradient(limits = c(0, 0.01), low = "darkslategray4", high = "gray75") +
+    theme_minimal() +
+    theme(legend.position = "none",plot.title = element_text(hjust = 0.5, size = 20, face = "bold")) +
+    labs(title = paste("Word Proportion Comparison:", character1, "vs", character2),
+         x = paste("Proportion of Words by", character1),
+         y = paste("Proportion of Words by", character2))
+}
+
+## Word Proportion Plot: Comparing Word Usage Between Two Characters ####
+create_word_proportion_plot("Ross", "Rachel")
+create_word_proportion_plot("Chandler", "Monica")
+create_word_proportion_plot("Joey", "Phoebe")
+
+## Negative-Positive Distribution in all seasons by using afinn lexicon ####
+df %>% 
+  group_by(season) %>% 
+  mutate(seq = row_number()) %>% 
+  ungroup() %>% 
+  unnest_tokens(word, quote) %>% 
+  anti_join(stop_words) %>% 
+  filter(!word %in% tolower(author)) %>% 
+  inner_join(bing) %>% 
+  count(season, index = seq %/% 50, sentiment) %>% 
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative) %>% 
+  ggplot(aes(index, sentiment, fill = factor(season))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(paste0("Season ",season)~., ncol = 2, scales = "free_x")+
+  theme_dark()+
+  theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 14))+
+  labs(x = "Index", y = "Sentiment", title = "Negative-Positive Distribution in all seasons by using afinn lexicon", subtitle = "Emotional Arcs Across Friends Seasons: A Sentiment Analysis Breakdown")
+
+## Total Sentiment Score by Episode with Afinn Lexicon ####
+all <- tidy_afinn %>%
+  group_by(episode_number) %>%
+  summarise(total = sum(value), .groups = 'drop') %>%
+  ungroup() %>%
+  mutate(Neg = if_else(total < 0, TRUE, FALSE))
+
+# Plotting
+ggplot() +
+  geom_path(data = all, mapping = aes(episode_number, total, group = 1), color = "#BA0E00") +
+  geom_hline(mapping = aes(yintercept = 0), color = "#024D38") +
+  theme_classic() +
+  theme(axis.title.x = element_blank(), 
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(),
+        plot.title = element_text(hjust = 0.5, color = "#EA181E", size = 20, face = "bold")) +
+  geom_text(data = all %>% filter(Neg == TRUE), mapping = aes(episode_number, total - 15, label = episode_number), angle = 90, size = 2) +
+  labs(title = "Total Sentiment Score by Episode with Afinn Lexicon", 
+       y = "Total Sentiment Score")
+
+## Research Question 1
+
+## Expressions of Affection: Analyzing 'Love' in Character Dialogues ####
+data_tokens <- df %>%
+  mutate(line = as.character(quote)) %>%
+  unnest_tokens(word, quote)
+
+# Count the occurrences of the word "love" for each author
+love_counts <- data_tokens %>%
+  filter(word == "love") %>%
+  count(author, sort = TRUE)
+
+
+ggplot(love_counts, aes(x = reorder(author, -n), y = n)) +
+  geom_point(size = 25, color = "lightpink2") +  
+  geom_segment(aes(x = author, y = 0, xend = author, yend = n), color = "lightpink2") +  # Add lines connecting circles to the x-axis
+  geom_text(aes(label = n), hjust = 0.5, vjust = 0.5,size=4) +  
+  labs(x = NULL, y = "Number of times 'love' is used", title = "Expressions of Affection: Analyzing 'Love' in Character Dialogues") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5 , size=10,face = "bold"),plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))  
+
+## Tracing Material Desires: Analyzing Materialism in Character Dialogues
+data_tokens <- data_tokens %>%
+  mutate(word = tolower(word))
+
+materialism_topics <- c("cars","jewelry","contracts","gucci","prada","chanel","louis vuitton", "estate", "fashion","money", "career", "wealth", "riches","rich","shopping", "possessions", "luxury", "affluence", "consumerism", "greed", "ambition", "success", "prosperity", "fortune", "money-minded", "capitalism","fortune","successful", "acquisition","bloomingdale","boots","prestige","design","designer","brand","glamour","prestige","affluence","fame","greed","prosperties","trendy","couture","fashionable","luxury","extravagance","status")
+
+
+# Count the occurrences of the relevant topics for each author
+materialism_counts <- data_tokens %>%
+  filter(word %in% materialism_topics) %>%
+  count(author, sort = TRUE)
+
+# Plot the graph
+ggplot(materialism_counts, aes(x = reorder(author, -n), y = n)) +
+  geom_point(size = 25, color = "royalblue") +  
+  geom_segment(aes(x = author, y = 0, xend = author, yend = n), color = "royalblue") +  
+  geom_text(aes(label = n), hjust = 0.5, vjust = 0.5, size=5, color="white") + 
+  labs(x = NULL, y = "Number of times materialistic topics are mentioned", title = "Tracing Material Desires: Analyzing Materialism in Character Dialogues") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5 , size=10, face = "bold"),plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))
+
+## Tracking the Pulse of Relationships: Seasonal Trends in Love, Break-ups, and Marriage ####
+# Create a new variable indicating the topic of each quote
+data_topic <- df %>%
+  mutate(topic = case_when(
+    grepl("\\b(break[- ]?up|split|separate|divorce|part ways|broken[- ]?heart|end[- ]?relationship)\\b", quote, ignore.case = TRUE) ~ "break-up",
+    grepl("\\b(love|adore|affection|romance|passion|devotion|amour)\\b", quote, ignore.case = TRUE) ~ "Love",
+    grepl("\\b(marriage|wedding|matrimony|union|nuptials|spouse|husband|wife)\\b", quote, ignore.case = TRUE) ~ "Marriage",
+    TRUE ~ "Other"
+  ))
+
+# Aggregate the data by season and count the occurrences of each topic
+topic_counts <- data_topic %>%
+  group_by(season, topic) %>%
+  summarise(count = n()) %>%
+  filter(topic %in% c("break-up", "Love", "Marriage")) 
+
+ggplot(topic_counts, aes(x = season, y = count, color = topic, group = topic)) +
+  geom_line(size = 1) +
+  labs(x = "Season", y = "Frequency", title = "Tracking the Pulse of Relationships: Seasonal Trends in Love, Break-ups, and Marriage") +
+  scale_color_manual(values = c("break-up" = "black", "Love" = "plum2", "Marriage" = "indianred3")) + # Specify colors for each topic
+  scale_x_continuous(breaks = 1:max(topic_counts$season)) +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))
+
+## Research Question 2
+
+## Sentiments of Each Character Using NRC Lexicon ####
+# Create a specific order for the authors
+tidy_nrc$author <- factor(tidy_nrc$author, levels = c("Chandler", "Joey", "Ross", "Monica", "Phoebe", "Rachel"))
+
+# Generate the plot
+ggplot(tidy_nrc %>% filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")), 
+       aes(sentiment, fill = author)) +
+  geom_bar(stat = "count", show.legend = FALSE) +
+  geom_text(aes(label = after_stat(count)), stat = "count", vjust = -0.5, color = "white", size = 2.5) +
+  facet_wrap(~ author, nrow = 2, ncol = 3) +  # Set the number of rows and columns
   theme_dark() +
   theme(
     strip.text = element_text(face = "bold"),
-    plot.title = element_text(hjust = 0.5, size = 20, face = "bold")
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
   ) +
   labs(fill = NULL, x = NULL, y = "Sentiment Frequency", title = "Sentiments of Each Character Using NRC Lexicon") +
   scale_fill_manual(values = c("#EA181E", "#00B4E8", "#FABE0F", "#EA181E", "#00B4E8", "#FABE0F"))
 
+## Negative-Positive Ratio in All Seasons Using Bing Lexicon ####
 tidy_bing %>% 
   filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")) %>% 
   group_by(season, author) %>% 
@@ -311,41 +649,7 @@ tidy_bing %>%
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   labs(y = NULL, x = "Season", fill = NULL, title = "Negative-Positive Ratio in All Seasons Using Bing Lexicon")
 
-df %>% 
-  group_by(season) %>% 
-  mutate(seq = row_number()) %>% 
-  ungroup() %>% 
-  unnest_tokens(word, quote) %>% 
-  anti_join(stop_words) %>% 
-  filter(!word %in% tolower(author)) %>% 
-  inner_join(bing) %>% 
-  count(season, index = seq %/% 50, sentiment) %>% 
-  spread(sentiment, n, fill = 0) %>%
-  mutate(sentiment = positive - negative) %>% 
-  ggplot(aes(index, sentiment, fill = factor(season))) +
-  geom_col(show.legend = FALSE) +
-  facet_wrap(paste0("Season ",season)~., ncol = 2, scales = "free_x")+
-  theme_dark()+
-  theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))+
-  labs(x = "Index", y = "Sentiment", title = "Negative-Positive Distribution in all seasons by using afinn lexicon")
-
-all <- tidy_afinn %>% 
-  mutate(Episode = factor(paste0("S",season,"-","E",episode_number))) %>% 
-  group_by(Episode) %>% 
-  summarise(total = sum(value), .groups = 'drop') %>% 
-  ungroup %>% 
-  mutate(Neg = if_else(total < 0, TRUE, FALSE))
-
-ggplot()+
-  geom_path(all, mapping = aes(Episode, total, group = 1), color = "#BA0E00")+
-  geom_hline(mapping = aes(yintercept = 0), color = "#024D38")+
-  theme_classic()+
-  theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank(),
-        plot.title = element_text(hjust = 0.5, color = "#EA181E", size = 20, face = "bold"))+
-  geom_text((all %>% filter(Neg == TRUE)), mapping = aes(Episode, total-15, label = Episode), angle = 90, size = 3)+
-  labs(title = "Total Sentiment Score each Episode with Afinn Lexicon", 
-       y = "Total Sentiment Score")
-
+## Sentiment Trajectory Across Seasons for Friends Characters ####
 tidy_afinn %>% 
   filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")) %>% 
   group_by(season, author) %>% 
@@ -354,57 +658,53 @@ tidy_afinn %>%
   mutate(Neg = if_else(total < 0, TRUE, FALSE)) %>% 
   ggplot()+
   geom_path(aes(season, total, color = author), linewidth = 1.2)+
+  geom_point(aes(season, total, color = author), size = 3)+
   theme_minimal()+
-  theme(legend.position = "bottom")+
+  theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))+
   scale_color_manual(values = c("#EA181E", "#00B4E8", "#FABE0F", "seagreen2", "orchid", "royalblue"))+
-  labs(x = "Season", color = NULL, y = "Total Sentiment Score")
+  labs(x = "Season", color = NULL, y = "Total Sentiment Score", title = "Sentiment Trajectory Across Seasons for Friends Characters")
 
-## Part VI: Analyzing LDA Model Results ####
+## Distinguishing Lexicons: Analyzing Character-Specific Keywords Across Narratives ####
+# Convert the text data to a DTM
+dtm <- tidy_text %>%
+  count(author, word) %>%
+  cast_dtm(document = author, term = word, value = n)
 
-# Prepare a Document-Term Matrix (DTM) for LDA topic modeling
-dtm <- tidy_text %>% 
-  select(season, word) %>% 
-  group_by(season, word) %>% 
-  count() %>% 
-  cast_dtm(season, word, n)
+# Convert DTM to a tidy data frame and calculate TF-IDF
+tidy_dtm <- dtm %>%
+  tidy() %>%
+  bind_tf_idf(term, document, count)
 
-# Perform LDA topic modeling with a fixed seed for reproducibility
-lda <- LDA(dtm, k = 10, control = list(seed = 1234))
-
-### Word-Topic Probabilities ####
-# Extract and visualize the word-topic probabilities from the LDA model
-topics <- tidy(lda, matrix = "beta")
-
-# Identify and arrange the top terms for each topic
-top_terms <- topics %>%
-  group_by(topic) %>%
-  top_n(10, beta) %>%
+# Filter to get the top 10 terms for each author based on TF-IDF
+top_terms_per_author <- tidy_dtm %>%
+  group_by(document) %>%
+  top_n(10, tf_idf) %>%
   ungroup() %>%
-  arrange(topic, -beta)
+  arrange(document, -tf_idf)
 
-# Visualization of top terms in each topic
-top_terms %>%
-  mutate(term = reorder_within(term, beta, topic)) %>%
-  ggplot(aes(term, beta, fill = factor(topic))) +
+# Define a specific order for the authors and their corresponding colors
+author_order <- c("Chandler", "Joey", "Ross", "Monica", "Phoebe", "Rachel")
+author_colors <- setNames(c("#EA181E", "#00B4E8", "#FABE0F", "#EA181E", "#00B4E8", "#FABE0F"), author_order)
+
+# Ensure that the 'document' factor in the data frame is in the specified order
+top_terms_per_author$document <- factor(top_terms_per_author$document, levels = author_order)
+
+# Generate the plot with specified author colors and order
+ggplot(top_terms_per_author, aes(x = reorder_within(term, tf_idf, document), y = tf_idf, fill = document)) +
   geom_col(show.legend = FALSE) +
-  facet_wrap(~topic, scales = "free") +
+  facet_wrap(~document, nrow = 2, scales = "free_y") +  # Organize facets in two rows
   coord_flip() +
   scale_x_reordered() +
-  labs(title = "Word-Topic Probabilities") +
-  theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))
-
-### Document-Topic Probabilities ####
-# Extract and visualize the document-topic probabilities from the LDA model
-documents <- tidy(lda, matrix = "gamma")
-
-# Visualization of document-topic distribution for each season
-documents %>%
-  ggplot(aes(document, gamma, fill = factor(topic))) +
-  geom_col(position = "fill") +
-  labs(x = "Season", fill = "Topic", y = "Gamma", title = "Document-Topic Probabilities") +
-  scale_fill_ordinal() +
+  scale_fill_manual(values = author_colors) +  # Apply the custom color scheme
+  labs(title = "Distinguishing Lexicons: Analyzing Character-Specific Keywords Across Narratives",
+       x = "Term Importance (TF-IDF)",
+       y = "Terms") +
+  theme_minimal() +
   theme(
-    legend.position = "top",
-    plot.title = element_text(hjust = 0.5, size = 20, face = "bold")
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)  # Improve x-axis label readability
   )
