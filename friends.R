@@ -357,6 +357,8 @@ speaking_count <- df %>%
   mutate(norm_count = count / max_count) %>%
   select(season, author, norm_count)
 
+speaking_count$season <- factor(speaking_count$season, levels = 1:10)
+
 speaking_count_long <- speaking_count %>%
   pivot_longer(cols = norm_count, names_to = "variable", values_to = "value")
 
