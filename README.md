@@ -11,7 +11,7 @@ Here we dissect character interactions, dialogue frequency, and sentiment throug
 -   `plots`: Consists of plot images that represent the key findings from our analysis.
 -   `presentation`: Contains slides prepared for presenting our project's findings.
 -   `proposal`: Holds the initial project proposal which laid the groundwork for this comprehensive analysis.
--   `project`: Includes the `friends_project.rmd`, the R Markdown file detailing our analysis workflow, methodology, and insights.
+-   `report`: Includes the `friends_report.rmd`, the R Markdown file detailing our analysis workflow, methodology, and insights.
 -   `README.md`: The document you're currently reading that guides you through the repository.
 -   `friends.R`: The R script that encompasses both the data cleaning process and the detailed analysis.
 
@@ -25,9 +25,9 @@ Here we dissect character interactions, dialogue frequency, and sentiment throug
 
 ## In-Depth Project Analysis
 
--   `project/friends_project.rmd`: For a complete and in-depth analysis, step into our `project` folder. The R Markdown file, `friends_project.rmd`, is a detailed narrative that interweaves our analytical process with findings and visualizations. From sentiment analysis to dialogue distribution, this document serves as a capstone to our project, illustrating the transformative journey from raw data to insightful narratives.
+-   `report/friends_report.rmd`: For a complete and in-depth analysis, step into our `report` folder. The R Markdown file, `friends_report.rmd`, is a detailed narrative that interweaves our analytical process with findings and visualizations. From sentiment analysis to dialogue distribution, this document serves as a capstone to our project, illustrating the transformative journey from raw data to insightful narratives.
 
--   This repository is structured to not only showcase our findings but also to enable enthusiasts and researchers to replicate or extend our study. The `project` folder is the heart of our analytical expedition, containing all the narratives, code, and commentary that piece together the complex dialogue interactions of the "Friends" characters.
+-   This repository is structured to not only showcase our findings but also to enable enthusiasts and researchers to replicate or extend our study. The `report` folder is the heart of our analytical expedition, containing all the narratives, code, and commentary that piece together the complex dialogue interactions of the "Friends" characters.
 
 ## Visual Narratives and Analysis Insights
 
@@ -41,7 +41,7 @@ Whether you're a data analyst, a "Friends" fanatic, or a narrative enthusiast, w
 
 -   Inspect `friends_quotes.csv` for a hands-on look at the analyzed dialogues.
 
--   Dive into the `project` folder to follow our comprehensive analysis narrative in `friends_project.rmd`.
+-   Dive into the `report` folder to follow our comprehensive analysis narrative in `friends_report.rmd`.
 
 -   Review our `proposal/friends_proposal.html` to trace our project's inception and its foundational goals.
 

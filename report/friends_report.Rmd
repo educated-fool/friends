@@ -1,0 +1,1004 @@
+---
+title: "Friends TV Show Dialogue Analysis"
+author: "Wenyang Cao, Wenling Zhou, Sixuan Li, Haoran Yang"
+date: "2024-04-29"
+output: 
+  html_document: 
+    theme: journal
+    toc: yes
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    code_folding: hide
+---
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  comment = "",
+  warning = FALSE,
+  message = FALSE,
+  eval=FALSE,
+  tidy.opts = list(width.cutoff = 55),
+  tidy = TRUE,
+  library(plotly),
+  library(plotly)
+)
+```
+
+![ ](/Users/yanghaoran/Desktop/5205 - FRAMEWORKS /Firends project/friends/Hollywood-Insider-Friends-TV-Sitcom.jpg)
+
+Our project's GitHub repository: <https://github.com/educated-fool/friends>
+
+
+## **Introduction**
+
+The popular TV sitcom Friends ran for 10 seasons from 1994 to 2004 and featured the lives of six young people - Rachel, Ross, Monica, Chandler, Phoebe and Joey.  Through their daily interactions, trials and tribulations of living in New York City, the show portrayed complex themes around friendship, love, relationships, career challenges and personal growth. The six friends come from diverse family backgrounds which shape their identities and worldviews.   Audiences connect deeply with the honest portrayal of their flaws and growth.
+
+Past research has analyzed aspects of the characters, story arcs, and audience reception of Friends. However, there remains a gap in understanding the emotional expression and cultural backgrounds reflected in the characters' dialogues. Friends provides a very analytical dataset, which is an analytical dataset to use for text analysis and sentiment analysis. Each character has a unique communication style, word usage, and emotional expression, providing a rich data source for us. Dialogue analysis enables an in-depth understanding of each character's personality traits and social background.
+
+## **Literature Review**
+
+A number of prior works have analyzed aspects of the Friends TV series related to this study.  Puri (2021) conducted a sentiment analysis of key story arcs and audience reactions posted on Reddit during a 2020 streaming release of the show.  By tallying emotional phrases like cheers, tears, and gasps, they identified the scenes that take fans on a nostalgia rollercoaster ride even on repeated views - like Ross and Rachel finally getting together.
+
+Bizri (2018) compared personality traits between characters using the Big Five personality model over the first 5 seasons.  Differences emerged showing Rachel as more extroverted than someone like Chandler.  However, this study did not connect personality directly to analysis of dialogue patterns and emotional expression itself.
+
+Seth (2017) analyzed scripts to determine how prominent each character was based on their total word count and number of lines.  While counting words gives a measure of "talkativeness", it does not provide insight into the actual content and sentiment of speech.  Our linguistic analysis will build on these basics to assess emotionality and cultural influences.
+
+By analyzing Friends character dialogues for both emotional expression and cultural influences, we can develop a deeper understanding of what each main cast member brought to one of TV’s most iconic sitcoms.  This methodology could be extended to other popular sitcoms to compare similarities and differences.
+
+## **Data Collection**
+
+### Part I: parse_and_scrape function
+
+```{r parse_and_scrape,eval=TRUE}
+##### ##### ##### ##### ##### ##### 
+##### Scraping the Data ##### ##### 
+##### ##### ##### ##### ##### ##### 
+
+##### ##### ##### ##### ##### ##### 
+#####       Part I      ##### ##### 
+##### ##### ##### ##### ##### ##### 
+
+##### ##### ##### ##### ##### ##### 
+# Part I: parse_and_scrape function
+##### ##### ##### ##### ##### ##### 
+
+# Load necessary libraries
+library(rvest)
+library(dplyr)
+library(stringr)
+library(purrr)
+
+# Base URL for the main Friends transcript page
+base_url <- "https://fangj.github.io/friends/"
+
+# Function to parse episode details and extract dialogues
+parse_and_scrape <- function(html_line) {
+  # Extract the href attribute and text
+  link <- html_attr(html_line, "href")
+  text <- html_text(html_line)
+  
+  # Construct full link
+  full_link <- paste0(base_url, link)
+  
+  # Adjusted to handle season 10 and special cases like 212-213 for episode numbers
+  # Now also handles ranges like 1017-1018
+  if(str_detect(link, "-")) {
+    match_data <- str_match(link, "season/(\\d{2})(\\d{2})-(\\d{2})\\.html")
+    season <- as.integer(match_data[, 2])
+    episode <- as.integer(match_data[, 3]) # Only the first episode in the range
+    episode_number <- sprintf("S%02dE%02d", season, episode)
+  } else {
+    match_data <- str_match(link, "season/(\\d{2})(\\d{2})\\.html")
+    season <- as.integer(match_data[, 2])
+    episode <- as.integer(match_data[, 3])
+    episode_number <- sprintf("S%02dE%02d", season, episode)
+  }
+  
+  title <- str_extract(text, "(?<=\\d\\s|-\\d\\s).*$") # Updated regex to handle ranges
+  
+  # Scrape dialogues from the episode's page
+  page <- read_html(full_link)
+  dialogues <- page %>%
+    html_nodes("p") %>%
+    html_text() %>%
+    .[str_detect(., regex("^(Monica|Joey|Chandler|Phoebe|Ross|Rachel):", ignore_case = TRUE))]
+  
+  if (length(dialogues) == 0) {
+    return(tibble())
+  }
+  
+  authors <- str_extract(dialogues, "^[A-Za-z]+")
+  quotes <- str_replace_all(dialogues, "^[A-Za-z]+:", "") %>%
+    str_trim()
+  quote_order <- seq_along(quotes)
+  
+  data_frame <- tibble(
+    season = season,
+    episode = episode,
+    episode_number = episode_number,
+    title = title,
+    author = authors,
+    quote = quotes,
+    quote_order = quote_order
+  )
+  
+  return(data_frame)
+}
+
+# Read the main page HTML and extract episode links
+main_page <- read_html(base_url)
+episode_links <- html_nodes(main_page, "ul li a")
+
+# Parse episode details and scrape dialogues for each episode link
+dialogues_data <- map_df(episode_links, parse_and_scrape)
+```
+
+### Part II: parse_single_episode function
+
+```{r parse_single_episode, eval=TRUE}
+##### ##### ##### ##### ##### ##### 
+#####       Part II     ##### ##### 
+##### ##### ##### ##### ##### ##### 
+
+##### ##### ##### ##### ##### ##### 
+# Part II: parse_single_episode function
+##### ##### ##### ##### ##### ##### 
+
+#Due to missing lines in the HTML source of episodes 3-24 of season 2, caused by <br> tags not 
+#being captured during the initial scrape, these episodes were excluded from the original dataset. 
+#A new function has been utilized to accurately scrape and incorporate the data from these pages.
+
+dialogues_data_wo_s2 <- dialogues_data %>%
+  filter(!(!is.na(season) & season == 2 & episode >= 3 & episode <= 24))
+
+# Function to parse a single episode's page
+parse_single_episode <- function(episode_url) {
+  # Read the HTML content of the page
+  page_content <- read_html(episode_url)
+  
+  # Extract the title of the episode
+  title <- page_content %>%
+    html_nodes("title") %>%
+    html_text() %>%
+    str_trim()
+  
+  # Extract all text from the page
+  text_all <- page_content %>%
+    html_nodes("body") %>%
+    html_text()
+  
+  # Use regular expression to find dialogues and split text into lines
+  dialogues_lines <- unlist(str_split(text_all, "\r\n|\n|\r"))
+  
+  # Filter lines that represent dialogues
+  dialogue_lines <- dialogues_lines[str_detect(dialogues_lines, "^(JOEY|CHANDLER|MONICA|PHOEBE|ROSS|RACHEL):")]
+  
+  # Extract author and quote
+  authors <- str_extract(dialogue_lines, "^[A-Z]+") %>% 
+    tolower() %>% 
+    str_to_title()
+  
+  quotes <- str_replace(dialogue_lines, "^[A-Z]+:", "")
+  
+  # Generate quote order
+  quote_order <- seq_along(quotes)
+  
+  # Handle special case for "0212-0213"
+  if (grepl("0212-0213.html", episode_url)) {
+    season <- NA
+    episode <- NA
+    episode_number <- NA
+  } else {
+    # Extract season and episode from URL
+    url_parts <- str_extract(episode_url, "(\\d{2})(\\d{2})\\.html$")
+    season <- as.integer(substr(url_parts, 1, 2))
+    episode <- as.integer(substr(url_parts, 3, 4))
+    episode_number <- sprintf("S%02dE%02d", season, episode)
+  }
+  
+  # Create a dataframe
+  data_frame <- tibble(
+    season = rep(season, length(quote_order)),
+    episode = rep(episode, length(quote_order)),
+    episode_number = rep(episode_number, length(quote_order)),
+    title = rep(title, length(quote_order)),
+    author = authors,
+    quote = quotes,
+    quote_order = quote_order
+  )
+  
+  return(data_frame)
+}
+
+# List of episode URLs
+episode_urls <- c(
+  "https://fangj.github.io/friends/season/0203.html",
+  "https://fangj.github.io/friends/season/0204.html",
+  "https://fangj.github.io/friends/season/0205.html",
+  "https://fangj.github.io/friends/season/0206.html",
+  "https://fangj.github.io/friends/season/0207.html",
+  "https://fangj.github.io/friends/season/0208.html",
+  "https://fangj.github.io/friends/season/0209.html",
+  "https://fangj.github.io/friends/season/0210.html",
+  "https://fangj.github.io/friends/season/0211.html",
+  "https://fangj.github.io/friends/season/0212-0213.html",
+  "https://fangj.github.io/friends/season/0214.html",
+  "https://fangj.github.io/friends/season/0215.html",
+  "https://fangj.github.io/friends/season/0216.html",
+  "https://fangj.github.io/friends/season/0217.html",
+  "https://fangj.github.io/friends/season/0218.html",
+  "https://fangj.github.io/friends/season/0219.html",
+  "https://fangj.github.io/friends/season/0220.html",
+  "https://fangj.github.io/friends/season/0221.html",
+  "https://fangj.github.io/friends/season/0222.html",
+  "https://fangj.github.io/friends/season/0223.html",
+  "https://fangj.github.io/friends/season/0224.html"
+)
+
+# Process each episode and combine data
+dialogues_data_s2 <- map_df(episode_urls, parse_single_episode)
+
+```
+
+### Part III: Merge and Clean
+
+```{r ,eval=TRUE, results='hide'}
+
+
+
+##### ##### ##### ##### ##### ##### 
+#####       Part III    ##### ##### 
+##### ##### ##### ##### ##### ##### 
+
+
+##### ##### ##### ##### ##### ##### 
+# Part III: Merge and Clean
+##### ##### ##### ##### ##### ##### 
+
+# Merge dialogues_data_wo_s2 and dialogues_data_s2
+df <- bind_rows(dialogues_data_wo_s2, dialogues_data_s2)
+
+# Convert author names to Title Case
+df <- df %>%
+  mutate(author = str_to_title(tolower(author)))
+
+# Convert special cases
+df <- df %>%
+  mutate(
+    season = case_when(
+      title == "In Barbados" ~ 9,
+      title == "That Could Have Been, Part I & II" ~ 6,
+      title == "The Last One, Part I & II" ~ 10,
+      title == "outtakesFriends Special: The Stuff You've Never Seen" ~ 7,
+      title == "The One After the Superbowl" ~ 2,
+      TRUE ~ season
+    ),
+    episode = case_when(
+      title == "In Barbados" ~ 23,
+      title == "That Could Have Been, Part I & II" ~ 15,
+      title == "The Last One, Part I & II" ~ 17,
+      title == "outtakesFriends Special: The Stuff You've Never Seen" ~ 24,
+      title == "The One After the Superbowl" ~ 12,
+      TRUE ~ episode
+    ),
+    episode_number = case_when(
+      title == "In Barbados" ~ "S09E23",
+      title == "That Could Have Been, Part I & II" ~ "S06E15",
+      title == "The Last One, Part I & II" ~ "S10E17",
+      title == "outtakesFriends Special: The Stuff You've Never Seen" ~ "S07E24",
+      title == "The One After the Superbowl" ~ "S02E12",
+      TRUE ~ episode_number
+    )
+  )
+
+# Calculate the number of quotes per episode
+quotes_count_per_episode <- df %>%
+  group_by(season, episode, episode_number, title) %>%
+  summarise(quotes_count = n())
+
+# Display the result
+print(quotes_count_per_episode)
+
+# Display the unique authors
+print(unique(df$author))
+
+```
+
+### Part IV: CSV and ZIP Files
+
+```{r eval=FALSE}
+##### ##### ##### ##### ##### ##### 
+#####       Part IV     ##### ##### 
+##### ##### ##### ##### ##### ##### 
+
+##### ##### ##### ##### ##### ##### 
+# Part IV: CSV and ZIP Files
+##### ##### ##### ##### ##### ##### 
+
+# Write the dataframe to a CSV file
+write.csv(df, "friends_quotes.csv", row.names = FALSE)
+
+# Compress the CSV file into a ZIP file
+zip(zipfile = "friends_quotes.zip", files = "friends_quotes.csv")
+```
+
+## **Data Analysis**
+### Raw Data Description
+Our team plans to use R to scrape quotes from the script of Friends, setting the process to obtain the exact variables needed for the analysis. This ensures the accuracy and flexibility of the data to fit our research goals.
+
+We aim to extract the 7 specific variables from the raw data：
+
+* `Season`: The number representing the season of the quote
+* `Episode`: The name of the episode where the quote is from
+* `Episode_number`: The episode number within the season
+* `Title`: The episode title
+* `Author`: The character who said the quote
+* `Quote`: The dialogue spoken by a character
+* `Quote_order`: The order of the quote within the episode
+
+By scraping these seven variables, we can create a comprehensive dataset containing each quote's necessary contextual information (season, episode, character). This dataset will enable us to conduct a thorough analysis of dialogue based on season, episode, and character, aligning with our text analysis research objectives.
+
+### Efforts to prepare the data
+
+#### 1. Part I: parse_and_scrape function
+
+We attempted to scrape `episode_number` from the raw data, and the results showed that while most episode titles correspond to one episode, some plot threads may span two episodes with the same title. For this situation, we processed the episode links to ensure that only the first episode in each episode range is displayed.
+
+For example, for episodes that combine two episodes into one, such as "The One After the Superbowl," the URL format is [https://fangj.github.io/friends/season/0212-0213.html](https://fangj.github.io/friends/season/0212-0213.html).
+A link containing "-" represents a range of episodes. In this case, we used an `if-else` conditional statement to parse the first episode number in the range as the `episode_number`. In the code, we employed a formal expression to extract the season number and the first episode number in the range from the link and format it as the correct episode number. Thus, for the URL [https://fangj.github.io/friends/season/0212-0213.html](https://fangj.github.io/friends/season/0212-0213.html), we parsed the episode number as `S02E12`.
+
+In addition, we addressed the case sensitivity of author names during the dialogue extraction process. The `str_detect` function in the `stringr` package is used to search within each vector element. The pattern `^(Monica|Joey|Chandler|Phoebe|Ross|Rachel)` matches any line that begins with these six names. However, our team noticed that some lines of dialogue where the author's name begins with a capital letter needed to be captured. To address this issue, we used the `ignore_case = TRUE` parameter in the `str_detect` function, which makes the search process case-insensitive. We ensured that regardless of whether authors' names were in uppercase or lowercase, they would be correctly matched to their respective dialogues and included in our dataset.
+
+
+#### 2. Part II: parse_single_episode function
+
+Some lines are missing from the HTML source for episodes 3 through 24 of Season 2 due to the `<br>` tags needing to be captured correctly. Some of the data from these episodes was not captured during the initial scraping process, so they were excluded from the original dataset. To address this issue, we created a new function that could accurately recapture the missing data from these episodes and merge it into the original dataset. This new function allows us to collect complete dialog data for all episodes of Season 2, ensuring the completeness and accuracy of the data and providing a more reliable foundation for further analysis and research.
+
+
+#### 3. Part III: Merge and Clean
+
+First, we used the `bind_rows()` function to merge two datasets, `dialogues_data_wo_s2` and `dialogues_data_s2`, into a single dataframe named "df" to merge the dialogues data from all the episodes of the second season.
+
+After the data was merged, we reviewed the formatting of the authors' names and found some inconsistencies. To ensure the consistency of the data, we used the `mutate()` function and the `str_to_title()` function to convert all author names to Title Case format, a form of initial capitalization. By doing so, we can ensure a uniform format of author names and make it easier to process and analyze the data further.
+
+For some cases where two episodes were merged into one, we could not successfully capture the `episode_number`. To deal with this, we used the `case_when` function to determine the `episode_number` based on the episode's title. We manually specify the `episode_number` for a specific episode title to ensure the integrity and accuracy of the data. If the episode title does not match a particular case, the original `episode_number` value is retained.
+
+Finally, we output two tables to summarize the final extraction: `quotes_count_per_episode` shows the number of conversations in each episode, and `unique(df$author)` lists all the individual authors in the dataset.
+
+### Exploratory Data Analysis
+
+#### 1. Initial Setup and Data Preparation
+
+The analysis begins by loading necessary libraries such as `tidyverse`, `tidytext`, `topicmodels`, and others to facilitate data manipulation, text processing, and visualization. The `'df'` dataframe is converted into a tibble for easier handling. Various sentiment lexicons (`AFINN`, `NRC`, `Bing`, and `Loughran`) are loaded to enable sentiment analysis later in the process.
+
+The text data is then cleaned and preprocessed using the `unnest_tokens` function from the `tidytext` package to tokenize quotes into individual words. Stop words, character names, and custom words (e.g., "`uhm`," "`it's`," "`ll`," etc.) are removed using `anti_join` and `filter` functions to focus on meaningful words. The cleaned text is then displayed using the `as_tibble()` function.
+
+Sentiment analysis preparation involves inner joining the cleaned text data with the `Bing`, `NRC`, and `AFINN` lexicons using the `inner_join()` function. This step allows for the association of sentiment scores or categories with each word in the text data.
+
+
+```{r, eval=TRUE, results='hide'}
+# Load necessary libraries
+library(tidyverse)
+library(tidytext)
+library(topicmodels)
+library(DT)
+library(png)
+library(grid)
+library(wordcloud)
+library(circlize)
+library(RColorBrewer)
+library(ggraph)
+library(igraph)
+library(reshape2)
+library(ggimage)
+library(plotly)
+
+# Convert the dataframe 'df' to a tibble for easier manipulation and viewing
+df %>% as_tibble()
+```
+
+#### 2. Identifying Dominant Characters and Analyzing Dialogue Dynamics
+
+
+```{r Sentiment, eval=TRUE, results='hide'}
+# Load various sentiment lexicons
+afinn <- get_sentiments('afinn')
+nrc <- get_sentiments('nrc')
+bing <- get_sentiments('bing')
+loughran <- get_sentiments('loughran')
+
+
+
+# Clean and preprocess text data
+tidy_text <- df %>%
+  unnest_tokens(word, quote) %>%  # Tokenize the quotes into words
+  anti_join(stop_words) %>%  # Remove stop words
+  filter(!word %in% tolower(author)) %>%  # Remove character names
+  # Additional custom cleaning steps
+  filter(!word %in% c("uhm", "it’s", "ll", "im", "don’t", "i’m", "that’s", "ve", "that’s", "you’re",
+                      "woah", "didn", "what're", "alright", "she’s", "we’re", "dont", "c'mere", "wouldn",
+                      "isn","pbs", "can’t", "je", "youre", "doesn", "007", "haven", "whoah", "whaddya", 
+                      "somethin", "yah", "uch", "i’ll", "there’s", "won’t", "didn’t", "you’ll", "allright",
+                      "yeah", "hey", "uh", "gonna", "umm", "um", "y'know", "ah", "ohh", "wanna", "ya", "huh", "wow",
+                      "whoa", "ooh", "don")) %>%
+  mutate(word = str_remove_all(word, "'s")) 
+
+tidy_text %>% as_tibble()  # Display the cleaned text
+
+
+
+# Sentiment analysis with Bing lexicon
+tidy_bing <- tidy_text %>% inner_join(bing)
+
+# Sentiment analysis with NRC lexicon
+tidy_nrc <- tidy_text %>% inner_join(nrc)
+
+# Sentiment analysis with AFINN lexicon
+tidy_afinn <- tidy_text %>% inner_join(afinn)
+```
+To identify the most influential characters in each episode, the analysis employs data manipulation techniques using `dplyr` functions. The count of quotes is summarized by season, episode, and author using `group_by()` and `summarise()`. The character with the most quotes in each episode is then selected using `arrange()` and `slice()`. This data is visualized as a treemap using the `plotly` package, where rectangle sizes represent the relative prominence of characters. The treemap provides an intuitive overview of character influence throughout the series.
+
+Next, the analysis delves into dialogue dynamics by calculating the total number of words and lines spoken by each main character. The `group_by()`, `summarise()`, and `sum()` functions are used to aggregate the data by character and calculate the respective totals. The results are visualized using a bubble plot with `ggplot2`, where each character is represented by their image, and the size of the bubble corresponds to the number of lines they delivered. This visualization offers insights into the overall dialogue contribution of each character.
+
+The seasonal dialogue distribution among characters is explored using similar data manipulation techniques, along with the `pivot_longer()` function to reshape the data for visualization. The normalized count of lines spoken by each character in each season is calculated, and the results are visualized as a heatmap using `ggplot2` and the `RColorBrewer` package. The heatmap provides a comparative view of character speaking volumes across seasons.
+
+
+```{r Plot_0, eval=TRUE}
+
+## Voices of Influence: Highlighting the Dominant Characters in Each Episode of 'Friends' ####
+# Summarize the count of quotes by season, episode, and author
+quote_counts <- df %>%
+  group_by(season, episode, author) %>%
+  summarise(quote_count = n(), .groups = "drop")
+
+# Select the character with the most quotes in each episode
+top_authors <- quote_counts %>%
+  arrange(desc(quote_count)) %>%
+  group_by(season, episode) %>%
+  slice(1) %>%
+  ungroup()
+
+# Create labels and parent nodes for the treemap
+labels <- c("Friends", paste("Season", unique(top_authors$season)), paste("Season", top_authors$season, "Episode", top_authors$episode, sep = " "))
+parents <- c("", rep("Friends", length(unique(top_authors$season))), rep(paste("Season", top_authors$season, sep = " "), each = 1))
+
+# Generate hover text showing only season and episode
+hover_text <- paste(labels, "<br>Most Vocal Character: ", top_authors$author)
+
+# Generate the treemap
+fig <- plot_ly(
+  type = "treemap",
+  labels = labels,
+  parents = parents,
+  text = hover_text,
+  hoverinfo = "text",
+  marker = list(colorscale = "Reds")
+)
+
+# Display the treemap
+fig
+```
+
+```{r Plot_1, eval=TRUE}
+## Dialogue Dynamics: Words and Lines Spoken by Friends Characters ####
+character_summary <- df %>%
+  group_by(author) %>%
+  summarise(
+    line_count = n(),
+    word_count = sum(str_count(quote, "\\S+"))
+  ) %>%
+  ungroup()
+# Set the image path for each character
+character_summary$image_path <- c(
+  "Chandler" = "/Users/yanghaoran/Desktop/5205 - FRAMEWORKS /Firends project/friends/pics/Chandler.png",
+  "Joey" = "/Users/yanghaoran/Desktop/5205 - FRAMEWORKS /Firends project/friends/pics/Joey.png",
+  "Monica" = "/Users/yanghaoran/Desktop/5205 - FRAMEWORKS /Firends project/friends/pics/Monica.png", 
+  "Phoebe" = "/Users/yanghaoran/Desktop/5205 - FRAMEWORKS /Firends project/friends/pics/Phoebe.png",
+  "Rachel" = "/Users/yanghaoran/Desktop/5205 - FRAMEWORKS /Firends project/friends/pics/Rachel.png", 
+  "Ross" = "/Users/yanghaoran/Desktop/5205 - FRAMEWORKS /Firends project/friends/pics/Ross.png"
+)
+
+# Create the plot using ggplot2
+ggplot(character_summary, aes(x = word_count, y = line_count, size = line_count)) +
+  geom_image(aes(image = image_path), size = 0.05) +
+  scale_size_continuous(range = c(3, 10)) +
+  theme_minimal() +
+  labs(title = "Dialogue Dynamics: Words and Lines Spoken by Friends' Characters",
+       subtitle = "Analyzing character engagement throughout the series",
+       x = "Count of Words",
+       y = "Number of lines") +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold", size = 13)) 
+```
+
+```{r Plot_2, eval=TRUE}
+speaking_count <- df %>%
+  group_by(season, author) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  ungroup() %>%
+  mutate(max_count = max(count)) %>%
+  mutate(norm_count = count / max_count) %>%
+  select(season, author, norm_count)
+
+speaking_count_long <- speaking_count %>%
+  pivot_longer(cols = norm_count, names_to = "variable", values_to = "value")
+
+ggplot(speaking_count_long, aes(x = author, y = season, fill = value)) +
+  geom_tile() + 
+  geom_text(aes(label = round(value, 2)), color = "white", size = 3) +
+  scale_fill_gradientn(colors = brewer.pal(9, "Blues")) +
+  labs(title = "Seasonal Dialogue Distribution Among Friends' Characters",
+     subtitle = "Comparative analysis of speaking volumes by season",
+     x = "",
+     y = "Season") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5, size = 13))
+```
+
+<strong>Insight:</strong> The treemap, bubble plot, and heatmap visualizations reveal dominant characters, their dialogue contributions, and the evolution of their prominence over seasons.  Ross and Rachel's similar word usage reflects their shared experiences, while Phoebe's fewer lines suggest a quirky side role.  Monica's prominence indicates her role as the group's organizer, Chandler's word count underscores his wit and growth, and Joey's dialogue showcases his straightforward personality.  These insights help address how dialogue styles and sentiment trajectories reflect personalities and emotional journeys, and how expressions of affection, material desires, and relationship dynamics shape character development.
+
+#### 3. Examining Character Interactions and Network Dynamics
+
+To analyze character interaction dynamics, the analysis calculates dialogue counts between pairs of characters using `dplyr` functions like `mutate()`, `lead()`, `filter()`, and `summarise()`. The resulting data is visualized as a chord diagram using the `circlize` package, which effectively showcases the flow and intensity of character interactions.
+
+Furthermore, an undirected graph is constructed from the interaction pairs using the `igraph` package. The `graph_from_data_frame()` function is used to create the graph, and the number of interactions serves as a proxy for the strength of character relationships. The graph is visualized using `ggraph`, with node sizes representing characters and edge widths and transparency indicating the strength of interactions. The circle layout is chosen to evenly distribute the nodes and emphasize the connections between characters.
+
+These network analysis techniques are appropriate for examining character relationships and their impact on narrative dynamics. The chord diagram and undirected graph provide visual representations of the complexity and strength of character interactions, aiding in understanding how these relationships shape character development and drive the story forward.
+
+
+```{r Plot_3, eval=TRUE}
+# Calculate dialogue counts
+dialogue_counts <- df %>%
+  mutate(next_author = lead(author)) %>%
+  filter(author != next_author) %>%
+  group_by(author, next_author) %>%
+  summarise(count = n(), .groups = 'drop') %>%  # Use .groups='drop' to ungroup after summarising
+  filter(!is.na(next_author)) %>%
+  rename(From = author, To = next_author, Value = count)
+
+# Plotting a chord diagram to visualize interactions
+chordDiagram(as.data.frame(dialogue_counts))
+
+# Calculate interaction pairs
+interaction_pairs <- df %>%
+  mutate(next_author = lead(author)) %>%
+  filter(!is.na(next_author) & author != next_author) %>%
+  group_by(author, next_author) %>%
+  summarise(interactions = n(), .groups = 'drop')  # Again, dropping groups after summarising
+
+# Create an undirected graph from the interaction pairs
+graph <- graph_from_data_frame(interaction_pairs, directed = FALSE)
+
+# Calculate the correlation (or some measure of strength of relationship) between characters
+# Here, we just use the number of interactions as a proxy for correlation
+correlation_matrix <- as_adjacency_matrix(graph, attr = "interactions", sparse = FALSE)
+colnames(correlation_matrix) <- V(graph)$name
+rownames(correlation_matrix) <- V(graph)$name
+```
+
+```{r Plot_4, eval=TRUE}
+# Use a circle layout to evenly distribute nodes
+# Adjust edge width and transparency to be more pronounced for higher interactions
+ggraph(graph, layout = 'circle') +
+  geom_edge_link(aes(edge_width = sqrt(interactions), edge_alpha = sqrt(interactions)), edge_colour = "gold") +
+  geom_node_point(color = "darkred", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1.8, size = 3.5) +
+  theme_void() +
+  theme(plot.margin = unit(c(1, 1, 1, 1), "cm")) 
+```
+ 
+**Insight**: The chord diagram and network visualization illuminate the depth and complexity of character relationships.  Rachel and Ross's pronounced interaction highlights their central storyline, while robust ties between Chandler, Monica, and Joey characterize their bonds through humor, companionship, and heartfelt exchanges.  Phoebe's balanced engagement suggests a harmonizing role.  These insights reveal how the frequency and nature of interactions shape character development, helping to dissect the narrative's complexity within the series' context.
+
+#### 4. Sentiment Analysis and Word Clouds
+
+Sentiment analysis is conducted by creating word clouds that differentiate between positive and negative words. The text data is tokenized into individual words using `unnest_tokens()` and then joined with the Bing sentiment lexicon using `inner_join()`. The frequency of words is calculated using `count()`, and a comparison word cloud is generated using the `wordcloud` package, with positive words in yellow and negative words in red. This visualization provides an overview of the emotional landscape of the series.
+
+To further investigate the language used by each character, individual word clouds are generated using a custom function that takes the character name, minimum frequency, maximum number of words, and color palette as parameters. The function subsets the data for the specified character, performs text cleaning and stop word removal, calculates word frequencies, and generates the word cloud using the `wordcloud` package. This approach allows for a detailed exploration of each character's unique language patterns and themes.
+
+Word clouds are suitable for analyzing sentiment and identifying prevalent words and themes in the text data. They provide a visually engaging way to explore the emotional tone of the series and highlight the distinct language used by each character, contributing to a deeper understanding of their personalities and development.
+
+
+```{r Plot_5, eval=TRUE}
+Friends <- read.csv("friends_quotes.csv", stringsAsFactors = FALSE)
+Friends <- Friends %>%
+  mutate(text = as.character(quote))
+friends_tokens <- Friends %>%
+  unnest_tokens(word, text)
+wordcloud_pos_neg <- friends_tokens %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#E91E22", "#F1BF45"), max.words = 200)
+```
+
+
+![ ](/Users/yanghaoran/Desktop/ross_wordcloud.png)
+
+
+
+
+**Insight**: The sentiment word clouds reveal the emotional landscape of Friends, with positive words like "love," "good," and "fun" dominating, reflecting the series' lighthearted tone.  Negative words like "sorry" and "wrong" are also present, indicating challenges and conflicts.  Character-specific word clouds highlight unique linguistic features, such as Ross's focus on relationships and family, Rachel's emphasis on independence and career, Joey's pursuit of romance, Monica's personal milestones, Chandler's humor, and Phoebe's artistic and free-spirited nature.  These insights shed light on how characters' desires and pursuits revolve around both emotional and tangible aspects of their lives.
+
+#### 5. Comparing Word Usage and Sentiment Distribution
+
+Based on the insights gained from the character interaction analysis, the study compares word usage between three key character pairs: Ross vs. Rachel, Chandler vs. Monica, and Joey vs. Phoebe. Word proportion plots are used to visualize these comparisons. A custom function, `create_word_proportion_plot()`, is defined to generate these plots. The function filters the text data for the specified characters, calculates the proportion of each word used by each character, and creates a scatter plot using `ggplot2`. The x and y axes represent the proportions of words used by each character, with a diagonal line indicating equal usage. The color of the points represents the absolute difference in proportions, highlighting words that are used more distinctively by one character compared to the other.
+
+Sentiment distribution across all seasons is analyzed using the `AFINN` lexicon. The data is grouped by season, tokenized into words, and joined with the `AFINN` lexicon using `inner_join()`. Sentiment scores are calculated for each segment of 50 lines using `mutate()`, `row_number()`, and `count()`. The results are visualized as a bar chart using `ggplot2`, with positive sentiment in green and negative sentiment in red, faceted by season. This analysis provides insights into the emotional arcs and sentiment patterns throughout the series.
+
+Word proportion plots and sentiment distribution analysis are appropriate techniques for comparing language usage between characters and examining sentiment trends across seasons. The word proportion plots highlight the distinctive words used by each character, reflecting their unique speaking styles and characteristics. The sentiment distribution analysis reveals the emotional trajectories of the series, allowing for the identification of key moments and patterns in the narrative.
+
+
+```{r Function_word_proportion,eval=TRUE}
+create_word_proportion_plot <- function(character1, character2) {
+  plot_data <- tidy_text %>%
+    filter(author %in% c(character1, character2)) %>% 
+    count(author, word) %>%
+    group_by(author) %>% 
+    mutate(proportion = round(n / sum(n), 3)) %>%
+    select(-n) %>% 
+    pivot_wider(names_from = author, values_from = proportion, values_fill = list(proportion = 0)) %>%
+    ungroup() %>%
+    mutate(
+      !!character1 := ifelse(.data[[character1]] == 0, 0.0001, .data[[character1]]),
+      !!character2 := ifelse(.data[[character2]] == 0, 0.0001, .data[[character2]])
+    )
+  
+  log_format <- function(base = 10) {
+    function(x) {
+      paste0(base, "^", round(log(x, base), 1))
+    }
+  }
+  
+ggplot(plot_data, aes(x = .data[[character1]], y = .data[[character2]], color = abs(.data[[character1]] - .data[[character2]]))) +
+    geom_abline(color = "gray40", lty = 2) +
+    geom_jitter(alpha = 0.05, size = 1, width = 0.1, height = 0.1) +
+    geom_text(aes(label = word), check_overlap = TRUE, vjust = 0.5, size = 3.5) +
+    scale_x_log10(labels = log_format()) +
+    scale_y_log10(labels = log_format()) +
+    scale_color_gradient(limits = c(0, 0.01), low = "darkslategray4", high = "gray75") +
+    theme_minimal() +
+    theme(legend.position = "none",plot.title = element_text(hjust = 0.5, size = 15, face = "bold")) +
+    labs(title = paste("Word Proportion Comparison:", character1, "vs", character2),
+         x = paste("Proportion of Words by", character1),
+         y = paste("Proportion of Words by", character2))
+}
+```
+
+```{r Plot_7, eval=TRUE}
+## Word Proportion Plot: Comparing Word Usage Between Two Characters ####
+create_word_proportion_plot("Ross", "Rachel")
+# create_word_proportion_plot("Chandler", "Monica")
+# create_word_proportion_plot("Joey", "Phoebe")
+```
+
+```{r Plot_8, eval=TRUE}
+## Negative-Positive Distribution in all seasons by using afinn lexicon ####
+df %>% 
+  group_by(season) %>% 
+  mutate(seq = row_number()) %>% 
+  ungroup() %>% 
+  unnest_tokens(word, quote) %>% 
+  anti_join(stop_words) %>% 
+  filter(!word %in% tolower(author)) %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  count(season, index = seq %/% 50, sentiment) %>% 
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative) %>% 
+  ggplot(aes(index, sentiment, fill = factor(season))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(paste0("Season ",season)~., ncol = 2, scales = "free_x")+
+  theme_dark()+
+  theme(plot.title = element_text(hjust = 0.5, size = 13, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 11))+
+  labs(x = "Index", y = "Sentiment", title = "Negative-Positive Distribution in all seasons by using afinn lexicon", subtitle = "Emotional Arcs Across Friends Seasons: A Sentiment Analysis Breakdown")
+```
+
+**Insight**: Word proportion plots reveal nuanced differences in character focus, with Rachel's words emphasizing independence and career growth, and Ross's highlighting family and romantic relationships.  Chandler and Monica's distinctive word choices reflect their complementary interaction style and differing approaches to expressing desires and aspirations.  The sentiment distribution analysis confirms patterns in narrative strategy and character development, with fluctuations corresponding to plot climaxes and character emotional arcs. The sentiment scores of key episodes indicate important desire dialogues and romantic declaration scenes.  These findings offer a data-driven perspective on character development and screenwriting techniques. 
+
+
+
+## **Research Question 1**
+
+#### How Do Expressions of Affection, Material Desires, and Relationship Dynamics Shape Character Development in 'Friends'?
+
+This question seeks to investigate the frequency and context of "love" in character dialogues, assess the emphasis on materialism, and evaluate the trends of romantic and marital discourse across different seasons to understand their impact on the characters' evolution and narrative progression.
+
+
+#### 1. Expressions of Affection: Analyzing 'Love' in Character Dialogues
+
+This analysis employed textual data processing techniques involving word-splitting and counting occurrences. Characters' dialogues were segmented, splitting each into individual words. Then, occurrences of the word "love" were counted in each character's dialog. This technique offers a quantitative measure for understanding love expressions, allowing comparison between characters and tracking trends over episodes. It's suitable for the question as it extracts keywords from dialogues, focusing on "love" frequency to understand characters' emotional expressions and personalities. Analyzing differences in love expressions aids in understanding character traits and emotional cues. Thus, it's an effective tool for exploring how characters express love in episodes.
+
+This chart reveals how often each character in the presumed show, likely "Friends," uses the word "love" in their dialogue. Their varying frequencies reflect their roles in exploring themes of affection and romance, offering insights into their personalities and relationship dynamics.
+
+Rachel Green's frequent expressions of love highlight her central role in exploring complex relationships and personal growth. From her runaway bride beginnings to her fashion success, Rachel's journey, especially her relationship with Ross Geller, showcases her transformation from naivety to confidence. Her strong bond with friends, particularly Monica, emphasizes the importance of companionship in navigating life's challenges.
+
+Monica and Ross Geller also contribute significantly to exploring love and relationships in "Friends." Monica's empathy and deep involvement in various relationships underscore the importance of companionship and support, especially in her eventual marriage. Ross's character, marked by romantic entanglements and emotional openings, captures the complexity of love, from his iconic relationship with Rachel to his experiences with marriage.
+
+In addition to Rachel's displays of affection, other characters in "Friends" show various forms of love throughout the series. Chandler's wit often masks his sentimental side, which becomes more apparent as his relationship with Monica develops. Phoebe's expressions of love reflect her eccentric outlook on life, extending from romance to friendship. Despite Joey's superficial portrayal, his deep feelings for his friends highlight loyalty in group dynamics.
+
+Each character in "Friends" explores love and relationships from unique perspectives and experiences, adding humor, honesty, and depth to the story. Through their ups and downs, they remind us that friendship, resilience, and the pursuit of love are enduring strengths amidst life's challenges.
+
+```{r Plot_10,eval=TRUE}
+## Expressions of Affection: Analyzing 'Love' in Character Dialogues ####
+data_tokens <- df %>%
+  mutate(line = as.character(quote)) %>%
+  unnest_tokens(word, quote)
+
+# Count the occurrences of the word "love" for each author
+love_counts <- data_tokens %>%
+  filter(word == "love") %>%
+  count(author, sort = TRUE)
+
+
+ggplot(love_counts, aes(x = reorder(author, -n), y = n)) +
+  geom_point(size = 25, color = "lightpink2") +  
+  geom_segment(aes(x = author, y = 0, xend = author, yend = n), color = "lightpink2") +  # Add lines connecting circles to the x-axis
+  geom_text(aes(label = n), hjust = 0.5, vjust = 0.5,size=4) +  
+  labs(x = NULL, y = "Number of times 'love' is used", title = "Expressions of Affection: Analyzing 'Love' in Character Dialogues") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5 , size=10,face = "bold"),plot.title = element_text(hjust = 0.5, size = 15, face = "bold"))  
+```
+
+
+
+#### 2. Tracing Material Desires: Analyzing Materialism in Character Dialogues
+
+This analytical method processes text data by breaking down conversations into individual words and counting keyword occurrences. It gauges characters' focus on materialism in dialogue, helping them understand their expressions and priorities regarding material desires. Extracting and quantifying materialism-related keywords offers insights into characters' values, priorities, and personality traits, as well as the show's commentary on consumer culture. This technique is apt for tracking characters' materialistic desires, providing a nuanced understanding of their engagement with topics like wealth, luxury, and success in episodes.
+
+We chose to analyze materialism in Friends because the story takes place in New York City, a business and fashion center synonymous with luxury and materialism. Observing the characters' attitudes toward material wealth provides insight into their personalities and behaviors in this context. Our analysis is based on textual data illustrating money, possessions, and lifestyles indicative of material wealth. The frequency of these references reflects the character's priorities, values, and the show's commentary on consumer culture.
+
+Rachel emerges as the character with the most references to materialism, which is expected given her background and storyline. First, Rachel is a character with a fashion background in the story; she works for a fashion company and has a deep interest in fashion and luxury goods. Secondly, Rachel is initially portrayed as a spoiled character whose background and lifestyle make her value shopping and luxury living relatively higher than others. As a result, she often shows her desire for designer labels, fashion, and worldly pleasures in her dialogue, which aligns with her characterization and personality traits in the story.
+
+Chandler's 87 mentions may seem surprising given his character's not-so-materialistic nature. However, his well-paid job in statistical analysis and satirical humor, often involving consumerism, might lead to conversations about materialism. Phoebe's 80 mentions reflect her past experiences and desire for stability despite being one of the least materialistic characters. Joey's 75 mentions align with his enjoyment of luxury when successful. Monica's 73 mentions match her competitive nature and high standard of living. With only 59 mentions, Ross reflects his academic focus over material pursuits despite leading a comfortable life.
+
+```{r Plot_11, eval=TRUE}
+## Tracing Material Desires: Analyzing Materialism in Character Dialogues
+data_tokens <- data_tokens %>%
+  mutate(word = tolower(word))
+
+materialism_topics <- c("cars","jewelry","contracts","gucci","prada","chanel","louis vuitton", "estate", "fashion","money", "career", "wealth", "riches","rich","shopping", "possessions", "luxury", "affluence", "consumerism", "greed", "ambition", "success", "prosperity", "fortune", "money-minded", "capitalism","fortune","successful", "acquisition","bloomingdale","boots","prestige","design","designer","brand","glamour","prestige","affluence","fame","greed","prosperties","trendy","couture","fashionable","luxury","extravagance","status")
+
+
+# Count the occurrences of the relevant topics for each author
+materialism_counts <- data_tokens %>%
+  filter(word %in% materialism_topics) %>%
+  count(author, sort = TRUE)
+
+# Plot the graph
+ggplot(materialism_counts, aes(x = reorder(author, -n), y = n)) +
+  geom_point(size = 25, color = "royalblue") +  
+  geom_segment(aes(x = author, y = 0, xend = author, yend = n), color = "royalblue") +  
+  geom_text(aes(label = n), hjust = 0.5, vjust = 0.5, size=5, color="white") + 
+  labs(x = NULL, y = "Number of times materialistic topics are mentioned", title = "Tracing Material Desires: Analyzing Materialism in Character Dialogues") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5 , size=10, face = "bold"),plot.title = element_text(hjust = 0.5, size = 13, face = "bold"))
+```
+
+
+#### 3. Tracking the Pulse of Relationships: Seasonal Trends in Love, Break-ups, and Marriage
+
+This technique combines textual data processing and visualization to effectively track seasonal trends in relationship themes. We extract relevant information by splitting episode dialogue into words and identifying critical themes like love, breakups, and marriage. Aggregating and analyzing this data by season provides insights into how these relationship themes evolve. Presenting the results as line graphs using data visualization techniques allows for an intuitive understanding of the frequency of these themes across seasons. This approach helps uncover trends in relationship themes and offers insights into the evolving dynamics between characters as the episodes progress. Expressing emotional trajectories enhances our understanding of the episodes' emotions and storylines. Therefore, this text data-based analytics technique is well-suited for tracking seasonal trends in relationship themes.
+
+**Love**
+
+In " Friends, "the "Love" line is one of the centerpieces of emotional expression, as shown through the characters' deep friendships and love relationships. As you can see from the chart, the "Love" line has continued to grow throughout the episodes, and the frequency of its utterance has remained high.
+
+Especially in season 7, the "Love" line reaches a small peak, which is closely related to the wedding episode in the season. Marriage is a deep commitment of love, and in season seven, Monica and Chandler's wedding became one of the major plotlines. This wedding was not only a celebration of love between two people but also a testament to and celebration of deep friendships between an entire group of people.
+
+During the wedding preparations, the audience can see the love and support between the characters. They show the deep friendship between Monica and Chandler by adding gifts, offering advice, and helping with the preparations for their wedding. Even on the wedding day, everyone is doing their best to make it the best day of Monica and Chandler's lives, and this collective love and support is evident in the "Love" thread.
+
+As a result, the seventh season's "Love" line reached a small peak, mainly due to the wedding episode, which brought together the love and emotions of the entire group, presenting viewers with a heartwarming and touching feast of friendship and love.
+
+**Breakup**
+
+The frequency of "breakup" episodes in " Friends " is relatively low, as the episodes as a whole focus more on friendship, love, and comedic conflict between characters. However, in seasons three and six, the frequency of "breakups" increased significantly, reflecting some of the important events and relationship changes that occurred in the show.
+
+In the third season, the rise in "breakup" episodes may be related to the emotional entanglements between some significant characters. For example, Ross and Rachel's relationship underwent twists and turns in the third season, especially after Ross' divorce from his ex-wife, Carol, began complicating his relationship with Rachel. In addition, Chandler and Linda's breakup also occurs in the third season, which brings the "breakup" plot to the forefront in this season.
+
+As for season six, the rise in "breakups" may be related to the characters' personal growth and the evolution of their relationships. During the season, some characters experienced professional, family, and relationship challenges, which may have led to some relationship breakdowns or disagreements. For example, Monica and Richard's breakup and Phoebe and Gary's breakup occurred in season six, adding new emotional tension and turning points to the plot.
+The increased frequency of "breakup" episodes in seasons 3 and 6 may be attributed to some of the show's critical emotional changes and character developments. These events injected more drama and emotional tension into the episodes and captured the viewers' attention.
+
+**Marriage**
+
+The theme of "marriage" culminates in Season 7, with many characters facing marriage and wedding-related plots and challenges throughout the season, adding more drama and emotional tension to the overall plot. Monica and Chandler's wedding preparations became the center of attention this season. Not only do they have to deal with all the wedding details, but they also have to deal with the challenges posed by family, friends, and the unexpected. Chandler also experiences much growth, showing maturity and strength as he braves his past and family issues.
+
+Secondly, the marital and relationship status of the other characters has also become an important plot point this season. The emotional entanglements between Ross and Rachel and the relationship experiences of characters such as Joey and Phoebe added more complexity and drama to the plot. The development and evolution of these plots made marriage a significant topic throughout the season, prompting viewers to pay more attention and become more invested in the characters' love lives.
+
+Overall, the flow and ebb of lines can reflect a season's drama and the development of character relationships. For example, a season with a low frequency of "love" and "marriage" but a high frequency of "breakups" may indicate a season filled with turmoil and conflict between the couples. The season was full of chaos and conflict between the couples. Conversely, a season dominated by "love" and "marriage" could mean a focus on romance and commitment.
+
+```{r Plot_12, eval=TRUE}
+## Tracking the Pulse of Relationships: Seasonal Trends in Love, Break-ups, and Marriage ####
+# Create a new variable indicating the topic of each quote
+data_topic <- df %>%
+  mutate(topic = case_when(
+    grepl("\\b(break[- ]?up|split|separate|divorce|part ways|broken[- ]?heart|end[- ]?relationship)\\b", quote, ignore.case = TRUE) ~ "break-up",
+    grepl("\\b(love|adore|affection|romance|passion|devotion|amour)\\b", quote, ignore.case = TRUE) ~ "Love",
+    grepl("\\b(marriage|wedding|matrimony|union|nuptials|spouse|husband|wife)\\b", quote, ignore.case = TRUE) ~ "Marriage",
+    TRUE ~ "Other"
+  ))
+
+# Aggregate the data by season and count the occurrences of each topic
+topic_counts <- data_topic %>%
+  group_by(season, topic) %>%
+  summarise(count = n()) %>%
+  filter(topic %in% c("break-up", "Love", "Marriage")) 
+
+ggplot(topic_counts, aes(x = season, y = count, color = topic, group = topic)) +
+  geom_line(size = 1) +
+  labs(x = "Season", y = "Frequency", title = "Tracking the Pulse of Relationships: Seasonal Trends in Love, Break-ups, and Marriage") +
+  scale_color_manual(values = c("break-up" = "black", "Love" = "plum2", "Marriage" = "indianred3")) + # Specify colors for each topic
+  scale_x_continuous(breaks = 1:max(topic_counts$season)) +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+```
+
+
+## **Research Question 2**
+
+#### How Do Characters' Dialogue Styles and Sentiment Trajectories Reflect Their Personalities and Emotional Journeys in 'Friends'?
+
+This research question aims to investigate the interplay between the dialogue styles, word choices, and sentiment trajectories of the characters in "Friends." Utilizing text mining techniques, the study will delve into how these linguistic elements reveal insights into the characters' emotional states, personal growth, and relationships throughout the series. The analysis will focus on understanding how spoken words and sentiment progression contribute to each character's narrative development and shape audience perceptions.
+
+#### 1. Sentiments of Each Character Using NRC Lexicon
+
+The distribution of sentiments inside "" Friends "" reveals a lot about the emotional spectrum of each character. Chandler's satirical humor reverberates around the bar, displaying extremes of joy and contempt. Joey's charmingly innocent demeanor belies his expression of delight and surprise. Monica has an intense sense of anticipation that perfectly complements her competitive nature. Despite his setbacks, Ross maintains a cheerful demeanor, perhaps because of his numerous touching moments, as seen by his towering yellow bar. Rachel's happiness is a reflection of her journey from a dependent person to an independent one. Phoebe is a distinctive and whimsical persona, typified by her vast range of emotions, which are distinguished by strong levels of joy and trust.
+
+```{r Plot_13,eval=TRUE}
+## Sentiments of Each Character Using NRC Lexicon ####
+# Create a specific order for the authors
+tidy_nrc$author <- factor(tidy_nrc$author, levels = c("Chandler", "Joey", "Ross", "Monica", "Phoebe", "Rachel"))
+
+# Generate the plot
+ggplot(tidy_nrc %>% filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")), 
+       aes(sentiment, fill = author)) +
+  geom_bar(stat = "count", show.legend = FALSE) +
+  geom_text(aes(label = after_stat(count)), stat = "count", vjust = -0.5, color = "white", size = 2.5) +
+  facet_wrap(~ author, nrow = 2, ncol = 3) +  # Set the number of rows and columns
+  theme_dark() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 15, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+  ) +
+  labs(fill = NULL, x = NULL, y = "Sentiment Frequency", title = "Sentiments of Each Character Using NRC Lexicon") +
+  scale_fill_manual(values = c("#EA181E", "#00B4E8", "#FABE0F", "#EA181E", "#00B4E8", "#FABE0F"))
+
+```
+
+#### 2. Negative-Positive Ratio in All Seasons Using Bing Lexicon
+
+This graph illustrates the dynamic balance between positive and negative sentiments for each character over ten seasons. Chandler's and Monica's consistent ratio speaks to the stability they find in each other. Joey consistently shows more blue, signaling a dominance of positive sentiment that complements his lighthearted character. Ross and Rachel's fluctuating sentiments parallel their tumultuous relationship trajectory, with their graphs displaying peaks and valleys that likely coincide with key relationship milestones.
+
+```{r Plot_14,eval=TRUE}
+## Negative-Positive Ratio in All Seasons Using Bing Lexicon ####
+tidy_bing %>% 
+  filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")) %>% 
+  group_by(season, author) %>% 
+  count(sentiment) %>%
+  ungroup() %>%
+  ggplot(aes(season, n, fill = sentiment)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = n), position = position_fill(0.5), color = "white") +
+  coord_flip() +
+  facet_wrap(~author) +
+  theme_dark() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, size = 15, face = "bold")
+  ) +
+  scale_fill_manual(values = c("#EA181E", "#00B4E8")) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  labs(y = NULL, x = "Season", fill = NULL, title = "Negative-Positive Ratio in All Seasons Using Bing Lexicon")
+```
+
+#### 3. Sentiment Trajectory Across Seasons for Friends Characters
+
+The sentiment trajectories across seasons for each character highlight significant story arcs and character development. Chandler’s upward trend suggests character growth and stability in his relationship with Monica. Joey’s less volatile path reflects his consistent role as the genial friend. Ross’s rollercoaster of sentiments could mirror his romantic entanglements and personal upheavals. Meanwhile, Phoebe and Rachel's graphs show peaks and troughs that could represent pivotal moments in their narratives, such as career triumphs and personal milestones.
+
+Ross in Season 4
+Ross’s sentiment plummets in Season 4, which is a particularly tumultuous time for him.  This is the season where Ross says the wrong name at his wedding with Emily, declaring “I take thee, Rachel,” a moment that becomes a defining and distressing turning point in his life.  It leads to the collapse of his marriage and consequent emotional lows, which would certainly contribute to a negative sentiment spike in the analysis.
+
+In Season 7, Joey, Monica, and Rachel navigate a complex mix of personal and professional challenges. Joey struggles with career setbacks and unresolved feelings for Rachel, causing notable dips in his sentiment. Monica experiences stress from her wedding preparations with Chandler, marked by joyous moments and high tension. Meanwhile, Rachel deals with career advancements and her evolving feelings for Joey, leading to fluctuating sentiments. These dynamics illustrate the characters' emotional landscapes as they balance life's ups and downs.
+
+Rachel in Season 10
+Rachel's sentiment sees a significant shift in Season 10, which is the final season.  Here, she grapples with major life decisions, like receiving a job offer from Louis Vuitton in Paris.  The latter part of the season focuses on her emotional struggle with saying goodbye to her friends and dealing with unresolved feelings for Ross.  These emotionally charged events would profoundly influence her sentiment trajectory, resulting in noticeable shifts in the data.
+
+```{r Plot_15,eval=TRUE}
+## Sentiment Trajectory Across Seasons for Friends Characters ####
+tidy_afinn %>% 
+  filter(author %in% c("Ross", "Monica", "Rachel", "Joey", "Chandler", "Phoebe")) %>% 
+  group_by(season, author) %>% 
+  summarise(total = sum(value), .groups = 'drop') %>% 
+  ungroup() %>% 
+  mutate(Neg = if_else(total < 0, TRUE, FALSE)) %>% 
+  ggplot()+
+  geom_path(aes(season, total, color = author), linewidth = 1.2)+
+  geom_point(aes(season, total, color = author), size = 3)+
+  theme_minimal()+
+  theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5, size = 15, face = "bold"))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))+
+  scale_color_manual(values = c("#EA181E", "#00B4E8", "#FABE0F", "seagreen2", "orchid", "royalblue"))+
+  labs(x = "Season", color = NULL, y = "Total Sentiment Score", title = "Sentiment Trajectory Across Seasons for Friends Characters")
+```
+
+
+#### 4. Distinguishing Lexicons: Analyzing Character-Specific Keywords Across Narratives
+
+The character-specific keywords in the graph highlight each Friends character's unique traits and narrative arcs. Chandler's words like "cheesecake" and "Batman" showcase his quirky humor, aligning with memorable comedic scenes. Joey's use of "casting" and "neurosurgeon" reflects his acting dreams and humorous struggles in roles beyond his skills. Ross's terms "paleontology" and "Mesozoic" emphasize his intellectual pursuits and professional identity in science.
+
+Rachel's words such as "Gucci" and "contracts" illustrate her growth from a waitress to a fashion industry professional, emphasizing her ambition. Monica's references to "headset" and "ovulating" blend her chef career demands with personal aspirations, including motherhood. Phoebe's eclectic terms like "Minsk" and "thermos" reveal her unconventional worldview and free-spirited nature.
+
+These linguistic markers provide insights into how dialogues shape each character's development and personal journey throughout the series.
+
+
+```{r Plot_16,eval=TRUE}
+## Distinguishing Lexicons: Analyzing Character-Specific Keywords Across Narratives ####
+# Convert the text data to a DTM
+dtm <- tidy_text %>%
+  count(author, word) %>%
+  cast_dtm(document = author, term = word, value = n)
+
+# Convert DTM to a tidy data frame and calculate TF-IDF
+tidy_dtm <- dtm %>%
+  tidy() %>%
+  bind_tf_idf(term, document, count)
+
+# Filter to get the top 10 terms for each author based on TF-IDF
+top_terms_per_author <- tidy_dtm %>%
+  group_by(document) %>%
+  top_n(10, tf_idf) %>%
+  ungroup() %>%
+  arrange(document, -tf_idf)
+
+# Define a specific order for the authors and their corresponding colors
+author_order <- c("Chandler", "Joey", "Ross", "Monica", "Phoebe", "Rachel")
+author_colors <- setNames(c("#EA181E", "#00B4E8", "#FABE0F", "#EA181E", "#00B4E8", "#FABE0F"), author_order)
+
+# Ensure that the 'document' factor in the data frame is in the specified order
+top_terms_per_author$document <- factor(top_terms_per_author$document, levels = author_order)
+
+# Generate the plot with specified author colors and order
+ggplot(top_terms_per_author, aes(x = reorder_within(term, tf_idf, document), y = tf_idf, fill = document)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~document, nrow = 2, scales = "free_y") +  # Organize facets in two rows
+  coord_flip() +
+  scale_x_reordered() +
+  scale_fill_manual(values = author_colors) +  # Apply the custom color scheme
+  labs(title = "Analyzing Character-Specific Keywords Across Narratives",
+       x = "Term Importance (TF-IDF)",
+       y = "Terms") +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 13, face = "bold"),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)  # Improve x-axis label readability
+  )
+```
+
+
+## **Conclusion and Recommendations**
+
+By analyzing the dialogue and emotional expressions of the characters in " Friends ", we can gain insight into their personalities, their relationships, and the narrative pulse of the episode as a whole. This comprehensive analysis not only enriches our understanding of each character's unique journey, but also deepens our awareness of the intricate relationships that bind them together. From the ups and downs of emotions to the nuances of material desires, each step of the characters' emotional journeys acted as a mirror reflecting our own life experiences, creating a deep and resonant connection with the audience. Moreover, these insights provide decision-makers with invaluable guidance on content creation, marketing, and platform management, enabling them to craft more resonant narratives, engage viewers more effectively, and forge a deeper emotional connection with the timeless classic series, " Friends ".
+
+Based on a comprehensive analysis of the emotional and lexical aspects of " Friends ", decision makers have access to a wealth of insights in content creation, marketing, and platform management that can optimize all aspects of the show. First, when it comes to content creation and character development, data-driven insights can provide writers and content creators with invaluable guidance to help them deepen episodes and build more fleshed-out characters. By understanding the emotional experiences and vocabulary characteristics of their characters, 
+they can more accurately portray their characters' inner worlds, making them more persuasive and resonant. For example, emotional analysis can reveal the key emotional trends of each character, while vocabulary analysis can help identify a character's personality traits and verbalizations. Decision makers can use these insights to guide creators in creating more compelling and in-depth episodic content.
+
+Second, when it comes to marketing and promotion, sentiment and lexical analysis provide marketing teams with valuable market insights. By understanding viewers' emotional responses to episodes and their emotional connections to characters, marketing teams can design more engaging and targeted campaigns and social media content. For example, based on the results of sentiment analysis, decision makers can determine which emotional themes have the greatest impact on viewers, so they can adjust their marketing strategy to better engage their target audience. Additionally, vocabulary analysis can help teams understand audience preferences and tastes so they can customize content to meet their needs. By combining insights from sentiment and vocabulary analytics, decision makers can create more compelling and impactful marketing campaigns, which in turn can increase awareness and ratings for episodes.
+
+
+## **Work Cited**
+
+- Jenny B. '25. “I’m Not Normal about Friends (Part 1).” MIT Admissions, 25 Nov. 2023, [mitadmissions.org/blogs/entry/im-not-normal-about-friends-part-1](https://mitadmissions.org/blogs/entry/im-not-normal-about-friends-part-1/#:~:text=Ross%20and%20Rachel%20both%20said). Accessed 25 Feb. 2024.
+- Sahakyan, Elizabeth Ter. “The One with the Data Scientist: A Closer Look at the Friends of Friends.” Medium, 28 June 2019, [medium.com/@liztersahakyan/the-one-with-the-data-scientist-a-closer-look-at-the-friends-of-friends-d3530d1902af](https://medium.com/@liztersahakyan/the-one-with-the-data-scientist-a-closer-look-at-the-friends-of-friends-d3530d1902af). Accessed 25 Feb. 2024.
+
+
